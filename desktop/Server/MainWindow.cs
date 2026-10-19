@@ -8,7 +8,7 @@ using RemoteAdmin.Shared;
 using Channel=RemoteAdmin.Shared.Channel;
 
 namespace RemoteAdmin.Server;
-public sealed class MainWindow : Form {
+public sealed partial class MainWindow : Form {
  readonly string folder=LocalData.Folder("Server");
  readonly TextBox fingerprint=Ui.Text("",650),code=Ui.Text("",360),chat=new(){Multiline=true,ReadOnly=true,Dock=DockStyle.Fill,ScrollBars=ScrollBars.Vertical},text=Ui.Text("",350);
  readonly NumericUpDown port=new(){Minimum=1024,Maximum=65535,Value=4899,Width=85};
@@ -29,14 +29,7 @@ public sealed class MainWindow : Form {
  public MainWindow(){
   Text="RemoteAdmin Server — разрешённый удалённый доступ";Width=900;Height=680;Ui.Theme(this);certificate=Identity.Load(folder);
   fingerprint.Text=Identity.Fingerprint(certificate);fingerprint.ReadOnly=true;code.ReadOnly=true;
-  var header=Ui.Row();header.Controls.Add(Ui.Label("REMOTEADMIN / SERVER"));header.Controls.Add(status);
-  var identity=Ui.Row();identity.Controls.Add(Ui.Label("SHA-256 сертификата — сравните на клиенте:"));identity.Controls.Add(fingerprint);
-  var pairingRow=Ui.Row();pairingRow.Controls.Add(Ui.Label("Одноразовый код (5 минут):"));pairingRow.Controls.Add(code);pairingRow.Controls.Add(Ui.Button("Новый код",(_,_)=>NewCode()));
-  var access=Ui.Row();access.Controls.Add(Ui.Label("TCP порт:"));access.Controls.Add(port);access.Controls.Add(control);access.Controls.Add(files);access.Controls.Add(clipboard);
-  access.Controls.Add(Ui.Button("Включить доступ",(_,_)=>Start()));access.Controls.Add(Ui.Button("Выключить доступ",(_,_)=>Stop()));access.Controls.Add(Ui.Button("Завершить сеанс",(_,_)=>session?.Cancel()));
-  var shared=Ui.Row();shared.Controls.Add(Ui.Label("Файлы доступны только в: "+share));
-  var send=Ui.Row();send.Dock=DockStyle.Bottom;send.Controls.Add(text);send.Controls.Add(Ui.Button("Отправить в чат",async(_,_)=>{if(channel!=null&&session!=null){try{await channel.Send("chat",new{message=text.Text},session.Token);chat.AppendText("Вы: "+text.Text+Environment.NewLine);text.Clear();}catch{session.Cancel();}}}));
-  Controls.Add(chat);Controls.Add(send);Controls.Add(shared);Controls.Add(access);Controls.Add(pairingRow);Controls.Add(identity);Controls.Add(header);
+  BuildLayout();
   control.CheckedChanged+=(_,_)=>session?.Cancel();files.CheckedChanged+=(_,_)=>session?.Cancel();clipboard.CheckedChanged+=(_,_)=>session?.Cancel();
   clipboardTimer.Tick+=async(_,_)=>{if(channel==null||session==null||!granted.HasFlag(Permissions.Clipboard))return;try{if(Clipboard.ContainsText()){var s=Clipboard.GetText();if(s!=lastClipboard&&System.Text.Encoding.UTF8.GetByteCount(s)<=1024*1024){lastClipboard=s;await channel.Send("clipboard",new{text=s},session.Token);}}}catch{}};clipboardTimer.Start();
   FormClosing+=(_,_)=>{closing=true;Stop();certificate.Dispose();clipboardTimer.Dispose();};NewCode();
@@ -63,8 +56,8 @@ public sealed class MainWindow : Form {
    approved=await Ui.OnUi(this,()=>{
     var allowed=Permissions.View|Permissions.Chat;if(control.Checked)allowed|=Permissions.Control;if(files.Checked)allowed|=Permissions.Files;if(clipboard.Checked)allowed|=Permissions.Clipboard;
     granted=hello.Requested&allowed;status.Text="Запрос от "+hello.Operator;
-    var result=Ui.Consent(this,$"Оператор: {hello.Operator}\nПрава: {granted}\nРазрешить доступ на срок до 1 часа?\n\nВы можете завершить сеанс в любой момент.");
-    if(result){status.Text="АКТИВНЫЙ СЕАНС · "+hello.Operator;BackColor=Color.FromArgb(45,30,30);}return result;
+    var result=Ui.Consent(this,$"Оператор: {hello.Operator}\nРазрешения: {Ui.Rights(granted)}\nРазрешить доступ на срок до 1 часа?\n\nВы можете завершить сеанс в любой момент.");
+    if(result){status.Text="АКТИВНЫЙ СЕАНС · "+hello.Operator;BackColor=Ui.Background;}return result;
    }).WaitAsync(TimeSpan.FromSeconds(65),token);
    if(!approved){await wire.Send("rejected",new{message="Доступ отклонён"},token);return;}
    LocalData.Audit(folder,"session.start",sessionId,"approved");channel=wire;monitor=0;fps=10;jpeg=65;
@@ -82,7 +75,7 @@ public sealed class MainWindow : Form {
      case "viewonly":input.Release();granted&=~Permissions.Control;break;
      case "text":Require(Permissions.Control);input.Text(msg.Data.GetProperty("text").GetString()??"");break;
      case "quality":var q=msg.Read<Quality>();if(q.Monitor<0||q.Monitor>=Screen.AllScreens.Length)throw new InvalidDataException("Неверный монитор");input.Release();Volatile.Write(ref monitor,q.Monitor);Volatile.Write(ref fps,Math.Clamp(q.Fps,1,30));Volatile.Write(ref jpeg,Math.Clamp(q.Jpeg,20,90));break;
-     case "chat":Require(Permissions.Chat);var message=msg.Data.GetProperty("message").GetString()??"";if(message.Length>8192)throw new InvalidDataException();await Ui.OnUi(this,()=>{chat.AppendText(hello.Operator+": "+message+Environment.NewLine);return true;});break;
+     case "chat":Require(Permissions.Chat);var message=msg.Data.GetProperty("message").GetString()??"";if(message.Length>8192)throw new InvalidDataException();await Ui.OnUi(this,()=>{chat.AppendText($"{hello.Operator} · {DateTime.Now:HH:mm}\r\n{message}\r\n\r\n");return true;});break;
      case "clipboard":Require(Permissions.Clipboard);var value=msg.Data.GetProperty("text").GetString()??"";if(System.Text.Encoding.UTF8.GetByteCount(value)>1024*1024)throw new InvalidDataException();await Ui.OnUi(this,()=>{lastClipboard=value;if(value.Length==0)Clipboard.Clear();else Clipboard.SetText(value);return true;});break;
      case "file":Require(Permissions.Files);var cmd=msg.Read<FileCommand>();FileReply reply;try{
       if(cmd.Op=="delete"&&!await Ui.OnUi(this,()=>MessageBox.Show(this,"Удалить из общей папки: "+cmd.Path+"?","Файловая операция",MessageBoxButtons.YesNo,MessageBoxIcon.Warning)==DialogResult.Yes))reply=new(false,"Удаление отклонено пользователем");else reply=await sandbox.Execute(cmd,token);

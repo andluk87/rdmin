@@ -10,7 +10,7 @@ using Channel=RemoteAdmin.Shared.Channel;
 
 namespace RemoteAdmin.Client;
 public sealed record Bookmark(string Name,string Host,int Port,string Fingerprint);
-public sealed class MainWindow : Form {
+public sealed partial class MainWindow : Form {
  readonly string folder=LocalData.Folder("Client");
  readonly TextBox host=Ui.Text("",180),pin=Ui.Text("",510),code=Ui.Text("",280),outgoing=Ui.Text("",350);
  readonly NumericUpDown port=new(){Minimum=1,Maximum=65535,Value=4899,Width=80};
@@ -28,11 +28,7 @@ public sealed class MainWindow : Form {
  bool busy,closing;
  public MainWindow(){
   Ui.Theme(this);Text="RemoteAdmin Client";Width=1250;Height=850;
-  var address=Ui.Row();address.Controls.Add(Ui.Label("REMOTEADMIN / CLIENT"));address.Controls.Add(bookmarks);address.Controls.Add(Ui.Button("Сохранить адрес",(_,_)=>SaveBookmark()));address.Controls.Add(Ui.Button("Удалить адрес",(_,_)=>DeleteBookmark()));address.Controls.Add(host);address.Controls.Add(port);
-  var security=Ui.Row();security.Controls.Add(Ui.Label("SHA-256 сервера:"));security.Controls.Add(pin);security.Controls.Add(Ui.Label("Разовый код:"));security.Controls.Add(code);code.UseSystemPasswordChar=true;
-  var actions=Ui.Row();actions.Controls.Add(viewOnly);actions.Controls.Add(files);actions.Controls.Add(clipboard);actions.Controls.Add(Ui.Button("Подключиться",async(_,_)=>await Connect()));actions.Controls.Add(Ui.Button("Отключиться",(_,_)=>Disconnect()));actions.Controls.Add(monitors);quality.Items.AddRange(["Экономичный","Стандартный","Высокое качество"]);quality.SelectedIndex=1;actions.Controls.Add(quality);actions.Controls.Add(Ui.Button("Файлы…",(_,_)=>OpenFiles()));actions.Controls.Add(Ui.Button("Ввести текст…",async(_,_)=>{if(!CanControl)return;var value=Ui.Ask(this,"Удалённый ввод","Unicode-текст для активного окна сервера");if(value!=null)await Send("text",new{text=value});}));actions.Controls.Add(Ui.Button("Полный экран",(_,_)=>{bool full=FormBorderStyle!=FormBorderStyle.None;FormBorderStyle=full?FormBorderStyle.None:FormBorderStyle.Sizable;WindowState=full?FormWindowState.Maximized:FormWindowState.Normal;}));
-  var bottom=Ui.Row();bottom.Dock=DockStyle.Bottom;bottom.Controls.Add(status);bottom.Controls.Add(outgoing);bottom.Controls.Add(Ui.Button("Отправить",async(_,_)=>{if(outgoing.Text.Length>8192)return;await Send("chat",new{message=outgoing.Text});chat.AppendText("Вы: "+outgoing.Text+Environment.NewLine);outgoing.Clear();}));
-  Controls.Add(screen);Controls.Add(chat);Controls.Add(bottom);Controls.Add(actions);Controls.Add(security);Controls.Add(address);
+  BuildLayout();
   bookmarks.SelectedIndexChanged+=(_,_)=>{if(bookmarks.SelectedIndex<0)return;var b=entries[bookmarks.SelectedIndex];host.Text=b.Host;port.Value=b.Port;pin.Text=b.Fingerprint;};
   monitors.SelectedIndexChanged+=async(_,_)=>await Quality();quality.SelectedIndexChanged+=async(_,_)=>await Quality();
   viewOnly.CheckedChanged+=async(_,_)=>{await Send("release",new{});if(viewOnly.Checked&&channel!=null){granted&=~Permissions.Control;await Send("viewonly",new{});}else if(channel!=null&&!granted.HasFlag(Permissions.Control)){status.Text="Для возврата управления подключитесь заново с подтверждением";}};
@@ -46,14 +42,27 @@ public sealed class MainWindow : Form {
  }
  bool CanControl=>!viewOnly.Checked&&granted.HasFlag(Permissions.Control)&&channel!=null;
  void LoadBookmarks(){try{var file=Path.Combine(folder,"addressbook.json");if(File.Exists(file))entries.AddRange(JsonSerializer.Deserialize<List<Bookmark>>(File.ReadAllText(file))??[]);}catch{status.Text="Не удалось прочитать адресную книгу";}RefreshBookmarks();}
- void RefreshBookmarks(){bookmarks.Items.Clear();bookmarks.Items.AddRange(entries.Select(x=>(object)x.Name).ToArray());}
- void SaveBookmark(){if(!ValidPin(pin.Text))return;var name=Ui.Ask(this,"Адресная книга","Название компьютера",host.Text);if(string.IsNullOrWhiteSpace(name))return;entries.RemoveAll(x=>x.Host==host.Text&&x.Port==(int)port.Value);entries.Add(new(name,host.Text.Trim(),(int)port.Value,NormalizePin(pin.Text)));File.WriteAllText(Path.Combine(folder,"addressbook.json"),JsonSerializer.Serialize(entries));RefreshBookmarks();}
- void DeleteBookmark(){if(bookmarks.SelectedIndex<0)return;entries.RemoveAt(bookmarks.SelectedIndex);File.WriteAllText(Path.Combine(folder,"addressbook.json"),JsonSerializer.Serialize(entries));RefreshBookmarks();}
+ void RefreshBookmarks(){bookmarks.Items.Clear();bookmarks.Items.AddRange(entries.Select(x=>(object)x.Name).ToArray());RefreshDeviceList();}
+ void SaveBookmark(){
+  if(string.IsNullOrWhiteSpace(host.Text)){status.Text="Введите адрес компьютера, который хотите сохранить.";host.Focus();return;}
+  if(!ValidPin(pin.Text)){status.Text="Для сохранения нужен ключ безопасности с сервера.";pin.Focus();return;}
+  var name=Ui.Ask(this,"Сохранить компьютер","Название в списке компьютеров",host.Text);if(string.IsNullOrWhiteSpace(name))return;
+  try{entries.RemoveAll(x=>x.Host==host.Text.Trim()&&x.Port==(int)port.Value);entries.Add(new(name.Trim(),host.Text.Trim(),(int)port.Value,NormalizePin(pin.Text)));File.WriteAllText(Path.Combine(folder,"addressbook.json"),JsonSerializer.Serialize(entries));RefreshBookmarks();status.Text="Компьютер сохранён. В следующий раз понадобится только новый код.";}catch(Exception e){status.Text="Не удалось сохранить компьютер: "+e.Message;}
+ }
+ void DeleteBookmark(){
+  if(deviceList.SelectedItem is not Bookmark selected)return;
+  if(MessageBox.Show(this,"Удалить «"+selected.Name+"» из списка? Это не удалит файлы на компьютере.","Удалить компьютер",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;
+  try{entries.Remove(selected);File.WriteAllText(Path.Combine(folder,"addressbook.json"),JsonSerializer.Serialize(entries));RefreshBookmarks();status.Text="Компьютер удалён из списка.";}catch(Exception e){status.Text="Не удалось сохранить список: "+e.Message;}
+ }
  static string NormalizePin(string value)=>value.Replace(" ","").Replace(":","").ToUpperInvariant();
  static bool ValidPin(string value){var v=NormalizePin(value);return v.Length==64&&v.All(Uri.IsHexDigit);}
  async Task Connect(){
-  if(busy||connection!=null)return;if(string.IsNullOrWhiteSpace(host.Text)||!ValidPin(pin.Text)||code.Text.Length!=32){status.Text="Введите адрес, SHA-256 сервера (64 hex) и одноразовый код (32 hex)";return;}
-  busy=true;var cts=new CancellationTokenSource();connection=cts;var token=cts.Token;Task? heartbeat=null;
+  if(busy||connection!=null)return;
+  code.Text=code.Text.Replace(" ","").Replace("-","").Trim().ToUpperInvariant();
+  if(string.IsNullOrWhiteSpace(host.Text)){FieldError(host,"Введите IP-адрес или имя удалённого компьютера.");return;}
+  if(!ValidPin(pin.Text)){FieldError(pin,"Вставьте ключ безопасности с сервера или используйте приглашение.");return;}
+  if(code.Text.Length!=32||!code.Text.All(Uri.IsHexDigit)){FieldError(code,"Нужен одноразовый код с сервера: 32 символа. Проще вставить приглашение.");return;}
+  busy=true;RefreshLayoutState();var cts=new CancellationTokenSource();connection=cts;var token=cts.Token;Task? heartbeat=null;
   try{
    status.Text="TLS: подключение и проверка сертификата…";using var tcp=new TcpClient();tcp.NoDelay=true;await tcp.ConnectAsync(host.Text.Trim(),(int)port.Value,token).AsTask().WaitAsync(TimeSpan.FromSeconds(10),token);
    var expected=NormalizePin(pin.Text);
@@ -65,25 +74,25 @@ public sealed class MainWindow : Form {
    Message first;using(var deadline=CancellationTokenSource.CreateLinkedTokenSource(token)){deadline.CancelAfter(TimeSpan.FromSeconds(75));first=await wire.Receive(deadline.Token,75);}
    if(first.Type!="welcome")throw new IOException(first.Data.TryGetProperty("message",out var error)?error.GetString():"Доступ отклонён");
    var welcome=first.Read<Welcome>();granted=welcome.Granted;sessionId=welcome.SessionId;monitors.Items.Clear();monitors.Items.AddRange(welcome.Displays.Select(d=>(object)$"{d.Index+1}: {d.Width}×{d.Height}").ToArray());if(monitors.Items.Count>0)monitors.SelectedIndex=0;
-   LocalData.Audit(folder,"session.start",sessionId,"connected");status.Text=$"TLS {ssl.SslProtocol} · {granted} · прямое соединение";
+   LocalData.Audit(folder,"session.start",sessionId,"connected");status.Text="Защищённое соединение · "+(granted.HasFlag(Permissions.Control)?"Управление разрешено":"Только просмотр");Ui.Hint(status,Ui.Rights(granted));RefreshLayoutState();
    heartbeat=Task.Run(async()=>{try{while(!token.IsCancellationRequested){await Task.Delay(10000,token);await wire.Send("ping",new{},token);}}catch{cts.Cancel();}},token);
    while(!token.IsCancellationRequested){var msg=await wire.Receive(token);switch(msg.Type){
     case "frame":var frame=msg.Read<ScreenFrame>();var data=Convert.FromBase64String(frame.Jpeg);using(var ms=new MemoryStream(data))using(var image=Image.FromStream(ms)){if(image.Width>7680||image.Height>4320)throw new InvalidDataException("Слишком большой кадр");screen.Frame=new Bitmap(image);}break;
     case "ping":await wire.Send("pong",new{},token);break;
     case "pong":break;
-    case "chat":var text=msg.Data.GetProperty("message").GetString()??"";if(text.Length>8192)throw new InvalidDataException();chat.AppendText("Сервер: "+text+Environment.NewLine);break;
+    case "chat":var text=msg.Data.GetProperty("message").GetString()??"";if(text.Length>8192)throw new InvalidDataException();chat.AppendText($"Сервер · {DateTime.Now:HH:mm}\r\n{text}\r\n\r\n");break;
     case "clipboard":if(granted.HasFlag(Permissions.Clipboard)&&clipboard.Checked){var textValue=msg.Data.GetProperty("text").GetString()??"";if(System.Text.Encoding.UTF8.GetByteCount(textValue)>1024*1024)throw new InvalidDataException();lastClipboard=textValue;if(textValue.Length==0)Clipboard.Clear();else Clipboard.SetText(textValue);}break;
     case "file.reply":if(pending.TryRemove(msg.Id,out var promise))promise.TrySetResult(msg.Read<FileReply>());break;
     case "error":throw new IOException(msg.Data.GetProperty("message").GetString());
     case "terminate":return;
     default:throw new InvalidDataException("Неизвестный ответ сервера");
    }}
-  }catch(OperationCanceledException){if(!closing)status.Text="Соединение завершено";}catch(Exception e){if(!closing)status.Text="Ошибка: "+e.Message;}
-  finally{cts.Cancel();if(heartbeat!=null)try{await heartbeat;}catch{}foreach(var item in pending.Values)item.TrySetCanceled();pending.Clear();channel=null;granted=Permissions.None;connection=null;cts.Dispose();busy=false;screen.Frame=null;if(sessionId!=""){LocalData.Audit(folder,"session.end",sessionId,"closed");sessionId="";}if(!closing)status.Text+=" · отключено";}
+  }catch(OperationCanceledException){if(!closing)status.Text="Соединение завершено";}catch(Exception e){if(!closing)status.Text=ConnectionError(e);}
+  finally{cts.Cancel();if(heartbeat!=null)try{await heartbeat;}catch{}foreach(var item in pending.Values)item.TrySetCanceled();pending.Clear();channel=null;granted=Permissions.None;connection=null;cts.Dispose();busy=false;screen.Frame=null;if(sessionId!=""){LocalData.Audit(folder,"session.end",sessionId,"closed");sessionId="";}if(!closing){RefreshLayoutState();status.Text+=" · отключено";}}
  }
  void Disconnect(){connection?.Cancel();}
  async Task Send(string type,object data){var wire=channel;var ct=connection;if(wire==null||ct==null)return;try{await wire.Send(type,data,ct.Token);}catch{ct.Cancel();}}
- async Task Mouse(string action,MouseEventArgs e){if(!CanControl||!screen.Coordinates(e.Location,out var x,out var y))return;int button=e.Button==MouseButtons.Right?1:e.Button==MouseButtons.Middle?2:0;await Send("mouse",new MouseEvent(action,x,y,button,e.Delta));}
+ async Task Mouse(string action,MouseEventArgs e){if(!CanControl)return;if(!screen.Coordinates(e.Location,out var x,out var y)){if(action=="up")await Send("release",new{});return;}int button=e.Button==MouseButtons.Right?1:e.Button==MouseButtons.Middle?2:0;await Send("mouse",new MouseEvent(action,x,y,button,e.Delta));}
  async Task Quality(){if(channel==null||monitors.SelectedIndex<0)return;var q=quality.SelectedIndex;await Send("quality",new Quality(monitors.SelectedIndex,q==0?5:q==2?20:10,q==0?35:q==2?85:65));}
  void OpenFiles(){if(channel==null||!granted.HasFlag(Permissions.Files)){status.Text="Передача файлов не разрешена сервером";return;}new FileWindow(RequestFile).Show(this);}
  async Task<FileReply> RequestFile(FileCommand command,CancellationToken ct){

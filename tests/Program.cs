@@ -21,5 +21,10 @@ try{
  bool badHash=false;try{await box.Execute(new("commit","bad.bin",Size:1,Sha256:new string('0',64)),default);}catch(IOException){badHash=true;}Check(badHash&&!File.Exists(Path.Combine(root,"bad.bin")),"reject checksum mismatch");
  var msg=Message.Of("key",new KeyEvent(65,true));var encoded=JsonSerializer.Serialize(msg,Wire.Json);var decoded=JsonSerializer.Deserialize<Message>(encoded,Wire.Json)!;Check(decoded.Read<KeyEvent>().Key==65,"protocol serialization");
  using var cert1=Identity.Load(root);using var cert2=Identity.Load(root);Check(Identity.Fingerprint(cert1)==Identity.Fingerprint(cert2)&&cert2.HasPrivateKey,"DPAPI persistent identity");
+ var pairing=PairingLink.Parse(PairingLink.Create("machine.example",4899,new string('A',64),new string('B',32)));
+ Check(pairing.Host=="machine.example"&&pairing.Port==4899&&pairing.Code==new string('B',32),"connection invitation preserves fields");
+ foreach(var invalid in new[]{"https://example.com", "remoteadmin://connect?host=test", "remoteadmin://connect?host=a&host=b"}){
+  bool rejected=false;try{PairingLink.Parse(invalid);}catch(FormatException){rejected=true;}Check(rejected,"reject malformed invitation");
+ }
  Console.WriteLine($"{passed} passed; 0 failed");
 }finally{Directory.Delete(root,true);}
