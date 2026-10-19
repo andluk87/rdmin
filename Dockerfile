@@ -32,6 +32,10 @@ RUN --mount=type=cache,id=remoteadmin-nuget,target=/root/.nuget/packages \
     dotnet publish desktop/Client/Client.csproj --no-restore -c Release -r win-x64 --self-contained true -p:EnableWindowsTargeting=true -maxcpucount:"$(( (BUILD_JOBS + 1) / 2 ))" -o /out/RemoteAdminClient
 
 FROM sources AS package
+# Debian ships the WiX compiler separately from msitools.
+RUN apt-get update && apt-get install -y --no-install-recommends wixl wixl-data \
+ && command -v wixl \
+ && rm -rf /var/lib/apt/lists/*
 COPY scripts/package.py scripts/package.py
 COPY README.md /documentation/README.md
 COPY docs/ /documentation/docs/
