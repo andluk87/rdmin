@@ -1,0 +1,8 @@
+.git
+dist
+*.zip
+*.msi
+SHA256SUMS
+**/bin
+**/obj
+.env
