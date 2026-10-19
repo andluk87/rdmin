@@ -6,3 +6,4 @@ SHA256SUMS
 **/bin
 **/obj
 .env
+*.log

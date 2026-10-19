@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import uuid
+import time
 import zipfile
 import xml.etree.ElementTree as ET
 
@@ -20,7 +21,9 @@ def element(parent, tag, **attrs):
 def stable(value):
     return str(uuid.uuid5(uuid.NAMESPACE_URL, 'remoteadmin/0.1/'+value)).upper()
 def package_app(app):
+    started = time.monotonic()
     name = 'RemoteAdmin'+app
+    print(f'[{name}] preparing MSI', flush=True)
     folder = out / name
     shutil.copytree(documentation, folder, dirs_exist_ok=True)
     wix = ET.Element('{'+NS+'}Wix')
@@ -59,10 +62,13 @@ def package_app(app):
     manifest = out / (name+'.wxs')
     ET.ElementTree(wix).write(manifest, encoding='utf-8', xml_declaration=True)
     subprocess.run(['wixl', '-a', 'x64', '-o', str(artifacts/(name+'-0.1.0-win-x64.msi')), str(manifest)], check=True)
-    with zipfile.ZipFile(artifacts/(name+'-0.1.0-win-x64.zip'), 'w', zipfile.ZIP_DEFLATED) as archive:
+    print(f'[{name}] MSI done in {time.monotonic()-started:.1f}s; preparing ZIP', flush=True)
+    with zipfile.ZipFile(artifacts/(name+'-0.1.0-win-x64.zip'), 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
         for file in sorted(folder.rglob('*')):
             if file.is_file():
                 archive.write(file, str(pathlib.Path(name)/file.relative_to(folder)))
+    print(f'[{name}] packaging complete in {time.monotonic()-started:.1f}s', flush=True)
+
 # Separate MSI and ZIP work for Server/Client can use CPU concurrently.
 with ThreadPoolExecutor(max_workers=2) as pool:
     list(pool.map(package_app, ('Server', 'Client')))
