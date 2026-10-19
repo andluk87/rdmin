@@ -15,12 +15,12 @@ public sealed partial class MainWindow {
  Button chatButton=null!;
 
  void BuildLayout(){
-  Text="RemoteAdmin · Подключения";Width=1380;Height=900;MinimumSize=new Size(1100,760);
+  Text=$"RemoteAdmin {Ui.AppVersion} · Подключения";Width=1380;Height=900;MinimumSize=new Size(1100,760);
   host.PlaceholderText="Например, 192.168.1.20";pin.PlaceholderText="Отпечаток с экрана сервера";code.PlaceholderText="Одноразовый код с сервера";code.UseSystemPasswordChar=true;code.MaxLength=80;
   pin.Font=new Font("Consolas",9);Ui.StyleCombo(monitors);Ui.StyleCombo(quality);quality.Width=165;quality.Items.AddRange(["Экономичный","Сбалансированный","Качество изображения"]);quality.SelectedIndex=1;
   var root=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=2,RowCount=1};appRoot=root;root.ColumnStyles.Add(new(SizeType.Absolute,276));root.ColumnStyles.Add(new(SizeType.Percent,100));root.RowStyles.Add(new(SizeType.Percent,100));
   var sidebar=new Panel{Dock=DockStyle.Fill,BackColor=Color.White,Padding=new Padding(22,26,18,20)};
-  var navTop=Ui.Stack();navTop.Dock=DockStyle.Top;Ui.Add(navTop,Ui.Heading("RemoteAdmin",20));Ui.Add(navTop,Ui.Description("Ваши компьютеры"));
+  var navTop=Ui.Stack();navTop.Dock=DockStyle.Top;Ui.Add(navTop,Ui.Heading("RemoteAdmin",20));Ui.Add(navTop,Ui.Description("Версия "+Ui.AppVersion+"  /  Ваши компьютеры"));
   Ui.Add(navTop,Ui.Primary("+ Новое подключение",(_,_)=>NewConnection()));deviceSearch.PlaceholderText="Поиск по имени или адресу";Ui.Add(navTop,deviceSearch);
   deviceSearch.TextChanged+=(_,_)=>RefreshDeviceList();deviceList.DrawItem+=DrawDevice;deviceList.SelectedIndexChanged+=(_,_)=>{if(deviceList.SelectedItem is Bookmark b&&!busy){bookmarks.SelectedIndex=entries.IndexOf(b);host.Focus();}};
   var navBottom=Ui.Stack();navBottom.Dock=DockStyle.Bottom;var navActions=Ui.Row();navActions.Controls.Add(Ui.Button("Сохранить",(_,_)=>SaveBookmark()));navActions.Controls.Add(Ui.Button("Удалить",(_,_)=>DeleteBookmark()));Ui.Add(navBottom,navActions);Ui.Add(navBottom,Ui.Description("Коды подключения не сохраняются."));

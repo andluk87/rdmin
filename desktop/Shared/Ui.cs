@@ -3,6 +3,7 @@ using System.Drawing.Drawing2D;
 namespace RemoteAdmin.Shared;
 
 public static class Ui {
+ public static string AppVersion=>typeof(Ui).Assembly.GetName().Version?.ToString(3)??"?";
  public static readonly Color Background=Color.FromArgb(243,246,251);
  public static readonly Color Panel=Color.White;
  public static readonly Color Accent=Color.FromArgb(48,102,235);

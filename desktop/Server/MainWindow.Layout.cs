@@ -11,10 +11,10 @@ public sealed partial class MainWindow {
  readonly System.Windows.Forms.Timer stateTimer=new(){Interval=1000};
 
  void BuildLayout(){
-  Width=1120;Height=850;MinimumSize=new Size(980,720);Text="RemoteAdmin · Этот компьютер";
+  Width=1120;Height=850;MinimumSize=new Size(980,720);Text=$"RemoteAdmin {Ui.AppVersion} · Этот компьютер";
   var root=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,RowCount=2,Padding=new Padding(28,20,28,20)};
   root.ColumnStyles.Add(new(SizeType.Percent,100));root.RowStyles.Add(new(SizeType.Absolute,76));root.RowStyles.Add(new(SizeType.Percent,100));
-  var heading=Ui.Stack();Ui.Add(heading,Ui.Heading("Этот компьютер",24));Ui.Add(heading,Ui.Description("RemoteAdmin Server  /  Вы решаете, кто получает доступ"));root.Controls.Add(heading,0,0);
+  var heading=Ui.Stack();Ui.Add(heading,Ui.Heading("Этот компьютер",24));Ui.Add(heading,Ui.Description("RemoteAdmin Server "+Ui.AppVersion+"  /  Вы решаете, кто получает доступ"));root.Controls.Add(heading,0,0);
   var columns=Ui.FillGrid(2);columns.ColumnStyles[0].Width=60;columns.ColumnStyles[1].Width=40;root.Controls.Add(columns,0,1);
   var left=new Panel{Dock=DockStyle.Fill,AutoScroll=true,Padding=new Padding(0,0,20,0)};var leftStack=Ui.Stack();left.Controls.Add(leftStack);columns.Controls.Add(left,0,0);
   var card=Ui.Card("Удалённый доступ");Ui.Add(card,accessTitle);Ui.Add(card,accessHint);

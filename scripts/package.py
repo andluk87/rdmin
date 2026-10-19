@@ -14,6 +14,10 @@ import xml.etree.ElementTree as ET
 out, documentation = (pathlib.Path(value).resolve() for value in sys.argv[1:])
 artifacts = pathlib.Path('/artifacts')
 artifacts.mkdir(parents=True, exist_ok=True)
+# Application assemblies and release artifacts share one version source.
+VERSION = ET.parse(pathlib.Path(__file__).resolve().parents[1] / 'desktop' / 'Directory.Build.props').findtext('./PropertyGroup/Version')
+if not VERSION or len(VERSION.split('.')) != 3 or not all(part.isdigit() for part in VERSION.split('.')):
+    raise ValueError('Expected a three-part release Version in Directory.Build.props')
 NS = 'http://schemas.microsoft.com/wix/2006/wi'
 ET.register_namespace('', NS)
 def element(parent, tag, **attrs):
@@ -27,9 +31,21 @@ def package_app(app):
     folder = out / name
     shutil.copytree(documentation, folder, dirs_exist_ok=True)
     wix = ET.Element('{'+NS+'}Wix')
-    product = element(wix, 'Product', Id=stable(name+'/product'), Name=name, Language='1033', Version='0.1.0', Manufacturer='RemoteAdmin', UpgradeCode=stable(name+'/upgrade'))
+    product = element(wix, 'Product', Id=stable(name+'/product/'+VERSION), Name=name, Language='1033', Version=VERSION, Manufacturer='RemoteAdmin', UpgradeCode=stable(name+'/upgrade'))
     element(product, 'Package', InstallerVersion='500', Compressed='yes', InstallScope='perMachine', Description=name+' interactive application')
     element(product, 'Media', Id='1', Cabinet=name+'.cab', EmbedCab='yes')
+    # Keep the original UpgradeCode and component GUID namespace across releases.
+    upgrade = element(product, 'Upgrade', Id=stable(name+'/upgrade'))
+    element(upgrade, 'UpgradeVersion', Minimum='0.0.0', Maximum=VERSION, IncludeMinimum='yes', IncludeMaximum='no', Property='PREVIOUSVERSIONSINSTALLED')
+    element(upgrade, 'UpgradeVersion', Minimum=VERSION, IncludeMinimum='no', OnlyDetect='yes', Property='NEWERVERSIONDETECTED')
+    element(product, 'Property', Id='PREVIOUSVERSIONSINSTALLED', Secure='yes')
+    element(product, 'Property', Id='NEWERVERSIONDETECTED', Secure='yes')
+    condition = element(product, 'Condition', Message='A newer version of this application is already installed.')
+    condition.text = 'Installed OR NOT NEWERVERSIONDETECTED'
+    sequence = element(product, 'InstallExecuteSequence')
+    remove = element(sequence, 'RemoveExistingProducts', After='InstallInitialize')
+    remove.text = 'PREVIOUSVERSIONSINSTALLED'
+
     target = element(product, 'Directory', Id='TARGETDIR', Name='SourceDir')
     program = element(target, 'Directory', Id='ProgramFiles64Folder')
     install = element(program, 'Directory', Id='INSTALLDIR', Name=name)
@@ -61,9 +77,9 @@ def package_app(app):
     element(feature, 'ComponentRef', Id='ShortcutComponent')
     manifest = out / (name+'.wxs')
     ET.ElementTree(wix).write(manifest, encoding='utf-8', xml_declaration=True)
-    subprocess.run(['wixl', '-a', 'x64', '-o', str(artifacts/(name+'-0.1.0-win-x64.msi')), manifest.name], cwd=out, check=True)
+    subprocess.run(['wixl', '-a', 'x64', '-o', str(artifacts/(name+'-'+VERSION+'-win-x64.msi')), manifest.name], cwd=out, check=True)
     print(f'[{name}] MSI done in {time.monotonic()-started:.1f}s; preparing ZIP', flush=True)
-    with zipfile.ZipFile(artifacts/(name+'-0.1.0-win-x64.zip'), 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
+    with zipfile.ZipFile(artifacts/(name+'-'+VERSION+'-win-x64.zip'), 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
         for file in sorted(folder.rglob('*')):
             if file.is_file():
                 archive.write(file, str(pathlib.Path(name)/file.relative_to(folder)))

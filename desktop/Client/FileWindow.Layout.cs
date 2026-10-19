@@ -8,7 +8,7 @@ public sealed partial class FileWindow {
  ImageList fileIcons=null!;
 
  void BuildLayout(){
-  Width=1200;Height=800;MinimumSize=new Size(960,660);Text="RemoteAdmin · Файлы";
+  Width=1200;Height=800;MinimumSize=new Size(960,660);Text=$"RemoteAdmin {Ui.AppVersion} · Файлы";
   var root=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new Padding(24),ColumnCount=1,RowCount=4};root.ColumnStyles.Add(new(SizeType.Percent,100));root.RowStyles.Add(new(SizeType.Absolute,78));root.RowStyles.Add(new(SizeType.Percent,100));root.RowStyles.Add(new(SizeType.AutoSize));root.RowStyles.Add(new(SizeType.Absolute,70));
   var header=Ui.Stack();Ui.Add(header,Ui.Heading("Передача файлов",22));Ui.Add(header,Ui.Description("Выберите файл и направление передачи. Незавершённая передача продолжится с сохранённого места."));root.Controls.Add(header,0,0);
   var panes=Ui.FillGrid(2);var localPane=BrowserPane("Ваш компьютер",local,left,true);localPane.Margin=new Padding(0,0,10,0);var remotePane=BrowserPane("Удалённый компьютер",remote,right,false);remotePane.Margin=new Padding(10,0,0,0);panes.Controls.Add(localPane,0,0);panes.Controls.Add(remotePane,1,0);root.Controls.Add(panes,0,1);
