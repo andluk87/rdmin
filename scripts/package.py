@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Executed by the VPS build container, never by onboarding."""
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import pathlib
 import shutil
@@ -18,7 +19,7 @@ def element(parent, tag, **attrs):
     return ET.SubElement(parent, '{'+NS+'}'+tag, attrs)
 def stable(value):
     return str(uuid.uuid5(uuid.NAMESPACE_URL, 'remoteadmin/0.1/'+value)).upper()
-for app in ('Server', 'Client'):
+def package_app(app):
     name = 'RemoteAdmin'+app
     folder = out / name
     shutil.copytree(documentation, folder, dirs_exist_ok=True)
@@ -62,6 +63,10 @@ for app in ('Server', 'Client'):
         for file in sorted(folder.rglob('*')):
             if file.is_file():
                 archive.write(file, str(pathlib.Path(name)/file.relative_to(folder)))
+# Separate MSI and ZIP work for Server/Client can use CPU concurrently.
+with ThreadPoolExecutor(max_workers=2) as pool:
+    list(pool.map(package_app, ('Server', 'Client')))
+
 with (artifacts/'SHA256SUMS').open('w') as checksums:
     for file in sorted(artifacts.iterdir()):
         if file.suffix in ('.zip', '.msi'):
