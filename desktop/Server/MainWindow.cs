@@ -1,3 +1,4 @@
+using Message = RemoteAdmin.Shared.Message;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;

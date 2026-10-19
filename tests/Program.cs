@@ -1,3 +1,4 @@
+using Message = RemoteAdmin.Shared.Message;
 using RemoteAdmin.Shared;
 using System.Security.Cryptography;
 using System.Text.Json;

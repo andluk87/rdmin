@@ -13,11 +13,11 @@ public sealed class FileWindow : Form {
   var split=new SplitContainer{Dock=DockStyle.Fill,Size=new Size(1000,400),SplitterDistance=490};split.Panel1.Controls.Add(left);split.Panel2.Controls.Add(right);foreach(var list in new[]{left,right}){list.Columns.Add("Имя",310);list.Columns.Add("Размер",130);}
   var bottom=Ui.Row();bottom.Dock=DockStyle.Bottom;bottom.Controls.Add(progress);Controls.Add(split);Controls.Add(bottom);Controls.Add(bar);Controls.Add(paths);
   left.DoubleClick+=async(_,_)=>await Run(async ct=>{if(left.SelectedItems.Count>0&&left.SelectedItems[0].Tag is FileItem item&&item.Directory){local.Text=Path.GetFullPath(Path.Combine(local.Text,item.Name));}await RefreshBoth(ct);});
-  right.DoubleClick+=async(_,_)=>await Run(async ct=>{if(right.SelectedItems.Count>0&&right.SelectedItems[0].Tag is FileItem item&&item.Directory){remote.Text=item.Name==".."?Parent(remoteFolder):Join(remoteFolder,item.Name);}await RefreshBoth(ct);});
+  right.DoubleClick+=async(_,_)=>await Run(async ct=>{if(right.SelectedItems.Count>0&&right.SelectedItems[0].Tag is FileItem item&&item.Directory){remote.Text=item.Name==".."?ParentFolder(remoteFolder):Join(remoteFolder,item.Name);}await RefreshBoth(ct);});
   Shown+=async(_,_)=>await Run(RefreshBoth);FormClosing+=(_,_)=>operation?.Cancel();
  }
  static string Join(string folder,string name)=>folder.Length==0?name:folder+"/"+name;
- static string Parent(string folder){int i=folder.LastIndexOf('/');return i<0?"":folder[..i];}
+ static string ParentFolder(string folder){int i=folder.LastIndexOf('/');return i<0?"":folder[..i];}
  async Task Run(Func<CancellationToken,Task> action){if(operation!=null)return;using var cts=new CancellationTokenSource();operation=cts;try{await action(cts.Token);if(!IsDisposed)progress.Text="Готово";}catch(OperationCanceledException){if(!IsDisposed)progress.Text="Отменено; частичный файл сохранён для докачки";}catch(Exception e){if(!IsDisposed)progress.Text=e.Message;}finally{operation=null;}}
  static void Fill(ListView view,IEnumerable<FileItem> items){view.Items.Clear();foreach(var item in items.OrderByDescending(x=>x.Directory).ThenBy(x=>x.Name)){var row=new ListViewItem(item.Directory?"[ "+item.Name+" ]":item.Name){Tag=item};row.SubItems.Add(item.Directory?"Папка":item.Size.ToString("N0"));view.Items.Add(row);}}
  async Task RefreshBoth(CancellationToken ct){
