@@ -3,10 +3,10 @@ using System.Text;
 using System.Text.Json;
 
 namespace RemoteAdmin.Shared;
-public enum AuthenticationMode { Accounts, Invitation, Both }
+public enum AuthenticationMode { Accounts, Invitation, Both, Windows, WindowsAndInvitation }
 public sealed record ServerAccount(string Id,string Username,string Salt,string PasswordHash,int Iterations,Permissions Rights,bool RequireApproval=false,bool Enabled=true);
 public sealed record AccountPolicy(Permissions Rights,bool Enabled);
-public sealed record ServerSettings(int Port=4899,AuthenticationMode Authentication=AuthenticationMode.Accounts,Permissions SupportRights=Permissions.View|Permissions.Control|Permissions.Chat,ServerAccount[]? Accounts=null);
+public sealed record ServerSettings(int Port=4899,AuthenticationMode Authentication=AuthenticationMode.Accounts,Permissions SupportRights=Permissions.View|Permissions.Control|Permissions.Chat,ServerAccount[]? Accounts=null,WindowsAccessRule[]? WindowsRules=null);
 
 public sealed class ServerAccounts {
  public const int PasswordIterations=600000;
@@ -14,7 +14,9 @@ public sealed class ServerAccounts {
  public ServerSettings Settings {get;private set;}
  public ServerAccount[] Accounts=>Settings.Accounts??[];
  public bool AllowsAccounts=>Settings.Authentication is AuthenticationMode.Accounts or AuthenticationMode.Both;
- public bool AllowsInvitations=>Settings.Authentication is AuthenticationMode.Invitation or AuthenticationMode.Both;
+ public bool AllowsInvitations=>Settings.Authentication is AuthenticationMode.Invitation or AuthenticationMode.Both or AuthenticationMode.WindowsAndInvitation;
+ public bool AllowsWindows=>Settings.Authentication is AuthenticationMode.Windows or AuthenticationMode.WindowsAndInvitation;
+ public WindowsAccessRule[] WindowsRules=>Settings.WindowsRules??[];
  static readonly byte[] DummySalt=RandomNumberGenerator.GetBytes(16);
  public ServerAccounts(string folder){
   path=Path.Combine(folder,"access.dpapi");
@@ -30,7 +32,7 @@ public sealed class ServerAccounts {
   username=username.Trim();if(!ValidUsername(username))throw new ArgumentException("Логин: 1–64 буквы, цифры, точка, дефис или подчёркивание.");
   var old=Accounts.FirstOrDefault(a=>a.Id==id);if(Accounts.Any(a=>a.Id!=id&&a.Username.Equals(username,StringComparison.OrdinalIgnoreCase)))throw new ArgumentException("Такой логин уже существует.");
   if(old==null&&Accounts.Length>=100)throw new ArgumentException("Достигнут лимит 100 учётных записей.");
-  const Permissions all=Permissions.View|Permissions.Control|Permissions.Files|Permissions.Chat|Permissions.Clipboard;
+  const Permissions all=PermissionSets.All;
   if((rights&~all)!=0||(rights.HasFlag(Permissions.Control)&&!rights.HasFlag(Permissions.View)))throw new ArgumentException("Для управления нужно разрешить просмотр экрана.");
   string salt,hash;
   if(!string.IsNullOrEmpty(password)){
@@ -41,9 +43,15 @@ public sealed class ServerAccounts {
   Save(Settings with{Accounts=Accounts.Where(a=>a.Id!=account.Id).Append(account).ToArray()});return account;
  }
  public void SetPolicies(IReadOnlyDictionary<string,AccountPolicy> policies){
-  const Permissions all=Permissions.View|Permissions.Control|Permissions.Files|Permissions.Chat|Permissions.Clipboard;
+  const Permissions all=PermissionSets.All;
   foreach(var policy in policies.Values)if((policy.Rights&~all)!=0||(policy.Rights.HasFlag(Permissions.Control)&&!policy.Rights.HasFlag(Permissions.View)))throw new ArgumentException("Для управления нужен просмотр экрана.");
   Save(Settings with{Accounts=Accounts.Select(a=>policies.TryGetValue(a.Id,out var policy)?a with{Rights=policy.Rights,Enabled=policy.Enabled,RequireApproval=false}:a).ToArray()});
+ }
+ public void SaveWindowsRules(WindowsAccessRule[] rules){
+  const Permissions all=PermissionSets.All;
+  if(rules.Length>100||rules.Select(x=>x.Sid).Distinct().Count()!=rules.Length)throw new ArgumentException("Допускается до 100 уникальных пользователей и групп.");
+  foreach(var rule in rules){_ = new System.Security.Principal.SecurityIdentifier(rule.Sid);if(((rule.Allow|rule.Deny)&~all)!=0)throw new ArgumentException("Неизвестные права Windows.");}
+  Save(Settings with{WindowsRules=rules});
  }
  public void Delete(string id)=>Save(Settings with{Accounts=Accounts.Where(a=>a.Id!=id).ToArray()});
  public ServerAccount? Authenticate(string username,string password){

@@ -22,7 +22,10 @@ public sealed class FileSandbox : IDisposable {
  public async Task<FileReply> Execute(FileCommand command,CancellationToken ct){
   var p=Resolve(command.Path);
   switch(command.Op){
-   case "list":return new(true,Items:new DirectoryInfo(p).EnumerateFileSystemInfos().Where(x=>(x.Attributes&FileAttributes.ReparsePoint)==0&&!x.Name.EndsWith(".ra-part",StringComparison.OrdinalIgnoreCase)).Take(2000).Select(x=>new FileItem(x.Name,x is DirectoryInfo,x is FileInfo f?f.Length:0)).ToArray());
+   case "list":
+    var entries=new DirectoryInfo(p).EnumerateFileSystemInfos().Where(x=>(x.Attributes&FileAttributes.ReparsePoint)==0&&!x.Name.EndsWith(".ra-part",StringComparison.OrdinalIgnoreCase)).Take(2001).ToArray();
+    if(entries.Length>2000)throw new IOException("В каталоге больше 2000 объектов. Разделите данные на подкаталоги; неполное копирование не выполняется.");
+    return new(true,Items:entries.Select(x=>new FileItem(x.Name,x is DirectoryInfo,x is FileInfo f?f.Length:0)).ToArray());
    case "mkdir":Directory.CreateDirectory(p);return new(true);
    case "rename":if(p==root)throw new IOException("Корень защищён");var to=Resolve(command.Target);if(File.Exists(p))File.Move(p,to);else Directory.Move(p,to);return new(true);
    case "delete":if(p==root)throw new IOException("Корень защищён");if(Directory.Exists(p))Directory.Delete(p,false);else File.Delete(p);return new(true);

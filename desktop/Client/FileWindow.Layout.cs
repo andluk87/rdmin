@@ -10,7 +10,7 @@ public sealed partial class FileWindow {
  void BuildLayout(){
   Font=new Font("Segoe UI",9);BackColor=SystemColors.Control;ForeColor=SystemColors.ControlText;Width=1200;Height=800;MinimumSize=new Size(960,660);Text=$"RemoteAdmin {Ui.AppVersion} · Файлы";
   var root=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new Padding(24),ColumnCount=1,RowCount=4};root.ColumnStyles.Add(new(SizeType.Percent,100));root.RowStyles.Add(new(SizeType.Absolute,78));root.RowStyles.Add(new(SizeType.Percent,100));root.RowStyles.Add(new(SizeType.AutoSize));root.RowStyles.Add(new(SizeType.Absolute,70));
-  var header=Ui.Stack();Ui.Add(header,Ui.Heading("Передача файлов",22));Ui.Add(header,Ui.Description("Выберите файл и направление передачи. Незавершённая передача продолжится с сохранённого места."));root.Controls.Add(header,0,0);
+  var header=Ui.Stack();Ui.Add(header,Ui.Heading("Передача файлов",22));Ui.Add(header,Ui.Description("Перетаскивайте файлы и папки между панелями или из Проводника на сервер. Доступна докачка."));root.Controls.Add(header,0,0);
   var panes=Ui.FillGrid(2);var localPane=BrowserPane("Ваш компьютер",local,left,true);localPane.Margin=new Padding(0,0,10,0);var remotePane=BrowserPane("Удалённый компьютер",remote,right,false);remotePane.Margin=new Padding(10,0,0,0);panes.Controls.Add(localPane,0,0);panes.Controls.Add(remotePane,1,0);root.Controls.Add(panes,0,1);
   fileIcons=new ImageList{ImageSize=new Size(20,20),ColorDepth=ColorDepth.Depth32Bit};fileIcons.Images.Add(FileIcon(true));fileIcons.Images.Add(FileIcon(false));
   foreach(var view in new[]{left,right}){
@@ -19,7 +19,7 @@ public sealed partial class FileWindow {
   }
   var actions=Ui.Row();actions.Padding=new Padding(0,14,0,0);
   uploadButton=ViewerUi.Button("На сервер →",async(_,_)=>await Run(Upload));downloadButton=ViewerUi.Button("← На компьютер",async(_,_)=>await Run(Download));renameButton=ViewerUi.Button("Переименовать",async(_,_)=>await Run(Rename));deleteButton=ViewerUi.Button("Удалить",async(_,_)=>await Run(Delete));
-  var mkdir=ViewerUi.Button("Новая папка",async(_,_)=>await Run(Mkdir));cancelTransfer=ViewerUi.Button("Отменить передачу",(_,_)=>operation?.Cancel());foreach(var button in new[]{uploadButton,downloadButton,mkdir,renameButton,deleteButton}){fileActions.Add(button);actions.Controls.Add(button);}actions.Controls.Add(cancelTransfer);root.Controls.Add(actions,0,2);
+  var mkdir=ViewerUi.Button("Новая папка",async(_,_)=>await Run(Mkdir));cancelTransfer=ViewerUi.Button("Отменить передачу",(_,_)=>CancelTransfers());foreach(var button in new[]{uploadButton,downloadButton,mkdir,renameButton,deleteButton}){fileActions.Add(button);actions.Controls.Add(button);}actions.Controls.Add(cancelTransfer);root.Controls.Add(actions,0,2);
   var bottom=Ui.Stack();bottom.Dock=DockStyle.Fill;Ui.Add(bottom,transferProgress);progress.AutoSize=false;progress.Height=36;progress.TextAlign=ContentAlignment.MiddleLeft;progress.ForeColor=Ui.Muted;Ui.Add(bottom,progress);root.Controls.Add(bottom,0,3);Controls.Add(root);
   FormClosed+=(_,_)=>fileIcons.Dispose();SetOperationState(false);
  }
@@ -38,7 +38,7 @@ public sealed partial class FileWindow {
   foreach(var action in fileActions)action.Enabled=!active;cancelTransfer.Enabled=active;local.ReadOnly=active;remote.ReadOnly=active;left.Enabled=!active;right.Enabled=!active;if(active){transferProgress.Value=0;progress.Text="Выполняется операция…";}UpdateFileActions();
  }
  void UpdateFileActions(){
-  if(uploadButton==null)return;bool idle=operation==null;uploadButton.Enabled=idle&&left.SelectedItems.Count==1&&left.SelectedItems[0].Tag is FileItem l&&!l.Directory;
-  downloadButton.Enabled=idle&&right.SelectedItems.Count==1&&right.SelectedItems[0].Tag is FileItem rr&&!rr.Directory;bool remoteSelected=idle&&right.SelectedItems.Count==1&&right.SelectedItems[0].Tag is FileItem item&&item.Name!="..";renameButton.Enabled=remoteSelected;deleteButton.Enabled=remoteSelected;
+  if(uploadButton==null)return;bool idle=operation==null;uploadButton.Enabled=idle&&left.SelectedItems.Count>0&&left.SelectedItems.Cast<ListViewItem>().All(x=>x.Tag is FileItem f&&f.Name!="..");
+  downloadButton.Enabled=idle&&right.SelectedItems.Count>0&&right.SelectedItems.Cast<ListViewItem>().All(x=>x.Tag is FileItem f&&f.Name!="..");bool remoteSelected=idle&&right.SelectedItems.Count==1&&right.SelectedItems[0].Tag is FileItem item&&item.Name!="..";renameButton.Enabled=remoteSelected;deleteButton.Enabled=remoteSelected;
  }
 }

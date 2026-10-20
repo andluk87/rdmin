@@ -39,10 +39,10 @@ public sealed partial class MainWindow : Form {
   FormClosing+=(_,e)=>{if(e.Cancel)return;closing=true;Stop();certificate.Dispose();clipboardTimer.Dispose();};NewCode();
  }
  void NewCode(){pairing=Identity.Code();code.Text=pairing;codeExpires=DateTimeOffset.UtcNow.AddMinutes(5);}
- void Start(){if(running!=null)return;if(accounts.AllowsAccounts&&!accounts.AllowsInvitations&&!accounts.Accounts.Any(a=>a.Enabled)){status.Text="Создайте и включите хотя бы одну учётную запись сервера.";return;}try{listener=new(IPAddress.IPv6Any,(int)port.Value);listener.Server.DualMode=true;listener.Start(8);running=new();status.Text="Ожидание подключения · порт "+port.Value;port.Enabled=false;_ = AcceptLoop(running.Token);}catch(Exception e){listener?.Stop();listener=null;status.Text=e.Message;}}
+ void Start(){if(running!=null)return;if(accounts.AllowsWindows&&!accounts.WindowsRules.Any(a=>a.Enabled&&a.Allow!=Permissions.None)){status.Text="Назначьте права хотя бы одному пользователю или группе Windows.";return;}if(accounts.AllowsAccounts&&!accounts.AllowsInvitations&&!accounts.Accounts.Any(a=>a.Enabled)){status.Text="Создайте и включите хотя бы одну учётную запись сервера.";return;}try{listener=new(IPAddress.IPv6Any,(int)port.Value);listener.Server.DualMode=true;listener.Start(8);running=new();status.Text="Ожидание подключения · порт "+port.Value;port.Enabled=false;_ = AcceptLoop(listener,running.Token);}catch(Exception e){listener?.Stop();listener=null;status.Text=e.Message;}}
  void Stop(){session?.Cancel();running?.Cancel();listener?.Stop();running=null;listener=null;if(!closing){status.Text="Доступ выключен";port.Enabled=true;}}
- async Task AcceptLoop(CancellationToken ct){
-  while(!ct.IsCancellationRequested){TcpClient? tcp=null;try{tcp=await listener!.AcceptTcpClientAsync(ct);tcp.NoDelay=true;using(tcp){await Serve(tcp,ct);}}catch(OperationCanceledException) when(ct.IsCancellationRequested){break;}
+ async Task AcceptLoop(TcpListener acceptingListener,CancellationToken ct){
+  while(!ct.IsCancellationRequested){TcpClient? tcp=null;try{tcp=await acceptingListener.AcceptTcpClientAsync(ct);tcp.NoDelay=true;using(tcp){await Serve(tcp,ct);}}catch(OperationCanceledException) when(ct.IsCancellationRequested){break;}
    catch(OperationCanceledException e){LocalData.Diagnostic(folder,"server",connectionPhase,e);if(!closing)status.Text="Сеанс отменён или истекло время ожидания. Сервер готов к следующему подключению.";}
    catch(Exception e){LocalData.Diagnostic(folder,"server",connectionPhase,e);if(!closing)await Ui.OnUi(this,()=>{status.Text="Ошибка на этапе «"+connectionPhase+"»: "+e.GetType().Name+". Подробности: diagnostics.jsonl";return true;});}finally{tcp?.Dispose();session=null;}}
  }
@@ -50,21 +50,24 @@ public sealed partial class MainWindow : Form {
   // One connection at a time, bounded handshake and pairing deadlines.
   using var sessionCts=CancellationTokenSource.CreateLinkedTokenSource(ct);sessionCts.CancelAfter(TimeSpan.FromHours(1));session=sessionCts;var token=sessionCts.Token;
   connectionPhase="TLS";using var ssl=new SslStream(tcp.GetStream(),false);using(var deadline=CancellationTokenSource.CreateLinkedTokenSource(token)){deadline.CancelAfter(TimeSpan.FromSeconds(10));await ssl.AuthenticateAsServerAsync(new SslServerAuthenticationOptions{ServerCertificate=certificate,EnabledSslProtocols=SslProtocols.Tls12|SslProtocols.Tls13,ClientCertificateRequired=false,CertificateRevocationCheckMode=X509RevocationMode.NoCheck},deadline.Token);}
-  await using var wire=new Channel(ssl);using var input=new RemoteInput();FileSandbox? sandbox=null;
+  await using var handshake=new Channel(ssl);Channel wire=handshake;Channel? windowsWire=null;System.Security.Principal.WindowsIdentity? windowsIdentity=null;using var input=new RemoteInput();FileSandbox? sandbox=null;
   Task? frames=null;Task? heartbeat=null;var approved=false;
   try{
-   connectionPhase="authentication_options";await wire.Send("auth.options",new AuthenticationOptions(accounts.AllowsAccounts,accounts.AllowsInvitations),token);
+   connectionPhase="authentication_options";await wire.Send("auth.options",new AuthenticationOptions(accounts.AllowsAccounts,accounts.AllowsInvitations,accounts.AllowsWindows),token);
    Message first;using(var deadline=CancellationTokenSource.CreateLinkedTokenSource(token)){deadline.CancelAfter(TimeSpan.FromSeconds(120));first=await wire.Receive(deadline.Token,120);}
    connectionPhase="login.message_type";if(first.Type!="hello"){
     await wire.Send("error",new{code="unexpected_before_login",message="До авторизации получена команда сеанса. Обновите клиент до версии 0.3.2 или новее."},token);return;
    }
    connectionPhase="login.parameters";var hello=first.Read<Hello>();
-   const Permissions all=Permissions.View|Permissions.Control|Permissions.Files|Permissions.Clipboard|Permissions.Chat;
+   const Permissions all=PermissionSets.All;
    if(hello.Operator.Length>128||hello.Username.Length>64||hello.Password.Length>256||(hello.Requested&~all)!=0)throw new InvalidDataException("Неверные параметры входа");
    var address=(tcp.Client.RemoteEndPoint as IPEndPoint)?.Address.ToString()??"unknown";
    if(!loginLimiter.Allow(address,DateTimeOffset.UtcNow)){await wire.Send("error",new{message="Слишком много попыток входа. Повторите через минуту."},token);return;}
    bool correct=false,requiresApproval=true;Permissions allowed=Permissions.None;activeUser="";
-   if(hello.AuthMode=="account"&&accounts.AllowsAccounts){
+   if(hello.AuthMode=="windows"&&accounts.AllowsWindows){
+    connectionPhase="windows_sspi";var windowsStream=await WindowsAuthentication.Server(ssl,token);windowsWire=new Channel(windowsStream);wire=windowsWire;
+    windowsIdentity=windowsStream.RemoteIdentity as System.Security.Principal.WindowsIdentity??throw new AuthenticationException("Windows identity недоступна");allowed=WindowsAuthentication.Rights(windowsIdentity,accounts.WindowsRules);correct=allowed!=Permissions.None;activeUser=windowsIdentity.Name;requiresApproval=false;
+   }else if(hello.AuthMode=="account"&&accounts.AllowsAccounts){
     var account=await Task.Run(()=>accounts.Authenticate(hello.Username,hello.Password)).WaitAsync(token);
     if(account!=null){correct=true;activeUser=account.Username;allowed=account.Rights;requiresApproval=false;}
    }else if(hello.AuthMode=="invitation"&&accounts.AllowsInvitations){
@@ -101,8 +104,10 @@ public sealed partial class MainWindow : Form {
      case "quality":var q=msg.Read<Quality>();if(q.Monitor<0||q.Monitor>=Screen.AllScreens.Length)throw new InvalidDataException("Неверный монитор");input.Release();Volatile.Write(ref monitor,q.Monitor);Volatile.Write(ref fps,Math.Clamp(q.Fps,1,30));Volatile.Write(ref jpeg,Math.Clamp(q.Jpeg,20,90));break;
      case "chat":Require(Permissions.Chat);var message=msg.Data.GetProperty("message").GetString()??"";if(message.Length>8192)throw new InvalidDataException();await Ui.OnUi(this,()=>{chat.AppendText($"{activeUser} · {DateTime.Now:HH:mm}\r\n{message}\r\n\r\n");return true;});break;
      case "clipboard":Require(Permissions.Clipboard);var value=msg.Data.GetProperty("text").GetString()??"";if(System.Text.Encoding.UTF8.GetByteCount(value)>1024*1024)throw new InvalidDataException();await Ui.OnUi(this,()=>{lastClipboard=value;if(value.Length==0)Clipboard.Clear();else Clipboard.SetText(value);return true;});break;
+     case "power":Require(Permissions.Power);var power=msg.Read<PowerCommand>();try{if(windowsIdentity!=null)System.Security.Principal.WindowsIdentity.RunImpersonated(windowsIdentity.AccessToken,()=>PowerActions.Execute(power.Action));else PowerActions.Execute(power.Action);LocalData.Audit(folder,"power."+power.Action,sessionId,"success",activeUser);await wire.Send("system.result",new{success=true,message="Команда питания принята Windows."},token,msg.Id);}catch(Exception e) when(e is System.ComponentModel.Win32Exception or ArgumentException){LocalData.Audit(folder,"power.failed",sessionId,"failed",activeUser);await wire.Send("system.result",new{success=false,message="Windows отклонила команду питания: "+e.Message},token,msg.Id);}break;
+     case "notify":Require(Permissions.Notify);var notice=msg.Read<NotifyCommand>();try{ShowNotification(notice.Text);LocalData.Audit(folder,"notification",sessionId,"success",activeUser);await wire.Send("system.result",new{success=true,message="Сообщение показано на сервере."},token,msg.Id);}catch(Exception e) when(e is InvalidOperationException or InvalidDataException){await wire.Send("system.result",new{success=false,message=e.Message},token,msg.Id);}break;
      case "file":Require(Permissions.Files);var cmd=msg.Read<FileCommand>();FileReply reply;try{
-      if(cmd.Op=="delete"&&requiresApproval&&!await Ui.OnUi(this,()=>MessageBox.Show(this,"Удалить из общей папки: "+cmd.Path+"?","Файловая операция",MessageBoxButtons.YesNo,MessageBoxIcon.Warning)==DialogResult.Yes))reply=new(false,"Удаление отклонено пользователем");else{sandbox??=new FileSandbox(share);reply=await sandbox.Execute(cmd,token);}
+      if(cmd.Op=="delete"&&requiresApproval&&!await Ui.OnUi(this,()=>MessageBox.Show(this,"Удалить из общей папки: "+cmd.Path+"?","Файловая операция",MessageBoxButtons.YesNo,MessageBoxIcon.Warning)==DialogResult.Yes))reply=new(false,"Удаление отклонено пользователем");else if(windowsIdentity!=null){reply=await System.Security.Principal.WindowsIdentity.RunImpersonatedAsync(windowsIdentity.AccessToken,async()=>{sandbox??=new FileSandbox(share);return await sandbox.Execute(cmd,token);});}else{sandbox??=new FileSandbox(share);reply=await sandbox.Execute(cmd,token);}
       LocalData.Audit(folder,"file."+cmd.Op,sessionId,reply.Ok?"success":"rejected");
      }catch(Exception e) when(e is IOException or UnauthorizedAccessException or FormatException){reply=new(false,e.Message);LocalData.Audit(folder,"file."+cmd.Op,sessionId,"failed");}await wire.Send("file.reply",reply,token,msg.Id);break;
      default:throw new InvalidDataException("Неизвестный тип сообщения");
@@ -113,7 +118,7 @@ public sealed partial class MainWindow : Form {
    try{await wire.Send("error",new{code="server_session_error",message="Сервер завершил подключение на этапе «"+connectionPhase+"». Проверьте diagnostics.jsonl на сервере."},token);}catch{}
    throw;
   }finally{
-   sessionCts.Cancel();input.Release();sandbox?.Dispose();if(frames!=null)try{await frames;}catch{}if(heartbeat!=null)try{await heartbeat;}catch{}channel=null;session=null;
+   sessionCts.Cancel();input.Release();sandbox?.Dispose();windowsIdentity?.Dispose();if(windowsWire!=null)await windowsWire.DisposeAsync();if(frames!=null)try{await frames;}catch{}if(heartbeat!=null)try{await heartbeat;}catch{}channel=null;session=null;
    if(approved)LocalData.Audit(folder,"session.end",sessionId,"closed",activeUser);if(!closing)await Ui.OnUi(this,()=>{BackColor=Ui.Background;status.Text=running!=null?"Ожидание подключения":"Доступ выключен";NewCode();return true;});
   }
  }

@@ -18,9 +18,9 @@ public static class Wire {
  public static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy=JsonNamingPolicy.CamelCase, PropertyNameCaseInsensitive=false, UnmappedMemberHandling=JsonUnmappedMemberHandling.Disallow };
 }
 public sealed class Channel : IAsyncDisposable {
- readonly SslStream stream;
+ readonly Stream stream;
  readonly SemaphoreSlim writer = new(1);
- public Channel(SslStream stream) { this.stream=stream; }
+ public Channel(Stream stream) { this.stream=stream; }
  public async Task Send(string type, object data, CancellationToken ct, string? id=null) => await Send(Message.Of(type,data,id),ct);
  public async Task Send(Message message, CancellationToken ct) {
   var bytes=JsonSerializer.SerializeToUtf8Bytes(message,Wire.Json);
@@ -41,9 +41,9 @@ public sealed class Channel : IAsyncDisposable {
  }
  public async ValueTask DisposeAsync(){ await stream.DisposeAsync(); }
 }
-[Flags] public enum Permissions { None=0, View=1, Control=2, Clipboard=4, Files=8, Chat=16 }
+[Flags] public enum Permissions { None=0, View=1, Control=2, Clipboard=4, Files=8, Chat=16, Power=32, Notify=64 }
 public sealed record Hello(string Code,string Operator,Permissions Requested,string AuthMode="invitation",string Username="",string Password="");
-public sealed record AuthenticationOptions(bool Accounts,bool Invitation);
+public sealed record AuthenticationOptions(bool Accounts,bool Invitation,bool Windows=false);
 public sealed record Welcome(string SessionId,Permissions Granted,DisplayInfo[] Displays,string Capture);
 public sealed record DisplayInfo(int Index,string Name,int X,int Y,int Width,int Height);
 public sealed record ScreenFrame(int Monitor,int Width,int Height,string Jpeg);
@@ -53,3 +53,7 @@ public sealed record FileCommand(string Op,string Path="",string Target="",long 
 public sealed record FileItem(string Name,bool Directory,long Size);
 public sealed record FileReply(bool Ok,string Error="",FileItem[]? Items=null,long Offset=0,string Data="",long Size=0,string Sha256="");
 public sealed record Quality(int Monitor,int Fps,int Jpeg);
+
+public static class PermissionSets { public const Permissions All=Permissions.View|Permissions.Control|Permissions.Files|Permissions.Clipboard|Permissions.Chat|Permissions.Power|Permissions.Notify; }
+public sealed record PowerCommand(string Action);
+public sealed record NotifyCommand(string Text);

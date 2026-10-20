@@ -38,6 +38,16 @@ try{
  Check(reopened.Settings.Port==5399&&reopened.Authenticate("operator","Strong-test-password-123")?.RequireApproval==false,"account settings and explicit unattended policy survive reopen");
  reopened.Put(operator1.Id,"operator",null,Permissions.View,true,false);
  Check(reopened.Authenticate("operator","Strong-test-password-123")==null,"disabled account rejected without deleting verifier");
+ using(var ntIdentity=System.Security.Principal.WindowsIdentity.GetCurrent()){
+  var sid=ntIdentity.User!.Value;
+  var ntRules=new[]{new WindowsAccessRule(sid,ntIdentity.Name,PermissionSets.All),new WindowsAccessRule(sid,ntIdentity.Name,Permissions.None,Permissions.View)};
+  var ntRights=WindowsAuthentication.Rights(ntIdentity,ntRules);
+  Check(!ntRights.HasFlag(Permissions.View)&&!ntRights.HasFlag(Permissions.Control)&&ntRights.HasFlag(Permissions.Files),"NT deny overrides allow and removes control without view");
+  reopened.SaveWindowsRules([ntRules[0]]);reopened.SaveSettings(5399,AuthenticationMode.Windows,Permissions.View);
+  var ntReopened=new ServerAccounts(root);
+  Check(ntReopened.AllowsWindows&&!ntReopened.AllowsAccounts&&ntReopened.WindowsRules.Single().Sid==sid,"NT rules and authentication mode persist");
+  Check(WindowsAuthentication.Rights(ntIdentity,[ntRules[0] with{Enabled=false}])==Permissions.None,"disabled NT rule grants no rights");
+ }
  var limiter=new LoginLimiter();var now=DateTimeOffset.UtcNow;for(int i=0;i<5;i++)Check(limiter.Allow("192.0.2.1",now),"bounded auth attempt accepted");Check(!limiter.Allow("192.0.2.1",now)&&limiter.Allow("192.0.2.1",now.AddMinutes(2)),"rate limit expires");
  var trust=new ServerTrust(root);trust.Remember("server",4899,new string('A',64));bool changedKey=false;try{trust.Remember("server",4899,new string('B',64));}catch(InvalidOperationException){changedKey=true;}Check(changedKey&&new ServerTrust(root).Get("SERVER",4899)==new string('A',64),"trusted server key cannot silently change");
  Console.WriteLine($"{passed} passed; 0 failed");
