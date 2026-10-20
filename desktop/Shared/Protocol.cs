@@ -42,7 +42,8 @@ public sealed class Channel : IAsyncDisposable {
  public async ValueTask DisposeAsync(){ await stream.DisposeAsync(); }
 }
 [Flags] public enum Permissions { None=0, View=1, Control=2, Clipboard=4, Files=8, Chat=16 }
-public sealed record Hello(string Code,string Operator,Permissions Requested);
+public sealed record Hello(string Code,string Operator,Permissions Requested,string AuthMode="invitation",string Username="",string Password="");
+public sealed record AuthenticationOptions(bool Accounts,bool Invitation);
 public sealed record Welcome(string SessionId,Permissions Granted,DisplayInfo[] Displays,string Capture);
 public sealed record DisplayInfo(int Index,string Name,int X,int Y,int Width,int Height);
 public sealed record ScreenFrame(int Monitor,int Width,int Height,string Jpeg);

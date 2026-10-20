@@ -30,18 +30,18 @@ public sealed partial class MainWindow {
   var title=Ui.Stack();Ui.Add(title,Ui.Heading("Подключение к компьютеру",23));Ui.Add(title,Ui.Description("Прямой защищённый доступ · Windows"));main.Controls.Add(title,0,0);
   workspace=Ui.FillGrid();var pages=new Panel{Dock=DockStyle.Fill};workspace.Controls.Add(pages,0,0);main.Controls.Add(workspace,0,1);
   connectionPage=new Panel{Dock=DockStyle.Fill,AutoScroll=true};var form=Ui.Stack();form.Padding=new Padding(0,0,14,0);
-  var quick=Ui.Card("Есть приглашение от владельца?","На сервере нажмите «Копировать приглашение» и отправьте его доверенным каналом. Здесь можно заполнить все поля одним действием.");Ui.Add(quick,Ui.Primary("Вставить приглашение",(_,_)=>PasteInvitation()));Ui.Add(form,quick);
-  var details=Ui.Card("Подключиться вручную","Укажите адрес и данные, которые показаны в RemoteAdmin Server.");
+  var quick=Ui.Card("Разовая техподдержка","На сервере нажмите «Копировать приглашение» и отправьте его доверенным каналом. Здесь можно заполнить все поля одним действием.");Ui.Add(quick,Ui.Primary("Вставить приглашение",(_,_)=>PasteInvitation()));quick.Visible=false;Ui.Add(form,quick);
+  var details=Ui.Card("Адрес сервера","Укажите IP-адрес или имя и порт. Способ входа и права доступа определяет сервер.");
   var address=Ui.FillGrid(2);address.AutoSize=true;address.Dock=DockStyle.Top;address.ColumnStyles[0].Width=76;address.ColumnStyles[1].Width=24;address.RowStyles.Clear();address.RowStyles.Add(new(SizeType.AutoSize));var addressField=Ui.Field("Адрес компьютера",host);addressField.Margin=new Padding(0,0,18,12);address.Controls.Add(addressField,0,0);address.Controls.Add(Ui.Field("Порт",port),1,0);Ui.Add(details,address);
-  Ui.Add(details,Ui.Field("Ключ безопасности · SHA-256",pin,"Сверьте отпечаток с владельцем компьютера. Приглашение содержит его автоматически."));Ui.Add(details,Ui.Field("Одноразовый код",code,"Код действует 5 минут и запрашивается заново для каждого подключения."));var reveal=new CheckBox{Text="Показать код",AutoSize=true};Ui.StyleCheck(reveal);reveal.CheckedChanged+=(_,_)=>code.UseSystemPasswordChar=!reveal.Checked;Ui.Add(details,reveal);
-  foreach(var check in new[]{viewOnly,files,clipboard})Ui.StyleCheck(check);viewOnly.Text="Только просмотр";files.Text="Запросить передачу файлов";clipboard.Text="Общий текстовый буфер";
-  var modes=Ui.Row();modes.Controls.Add(viewOnly);modes.Controls.Add(files);modes.Controls.Add(clipboard);Ui.Add(details,modes);
+  var advanced=Ui.Stack();advanced.Visible=false;
+  Ui.Add(advanced,Ui.Field("Ключ сервера · необязательно для первого подключения",pin,"При первом подключении подтвердите ключ, затем он проверяется автоматически. Изменённый ключ блокирует вход."));Ui.Add(advanced,Ui.Field("Код разовой техподдержки · необязательно",code));Ui.Add(advanced,Ui.Button("Забыть ключ этого сервера",(_,_)=>ForgetServerKey()));Ui.Add(details,advanced);
+  var extras=Ui.Row();extras.Controls.Add(Ui.Button("Ключ и приглашение…",(_,_)=>{advanced.Visible=!advanced.Visible;quick.Visible=advanced.Visible;}));Ui.StyleCheck(viewOnly);viewOnly.Text="Начать в режиме просмотра";extras.Controls.Add(viewOnly);Ui.Add(details,extras);
   connectButton=Ui.Primary("Подключиться к компьютеру",async(_,_)=>await Connect());Ui.Add(details,connectButton);Ui.Add(form,details);
-  Ui.Add(form,Ui.Description("Владелец увидит запрос и выберет, разрешить ли доступ. Для интернета нужен доступный адрес VPN или настроенный сетевой порт."));connectionPage.Controls.Add(form);
+  Ui.Add(form,Ui.Description("После подключения сервер запросит логин и пароль либо код, в зависимости от своих настроек. Для интернета нужен VPN или доступный сетевой порт."));connectionPage.Controls.Add(form);
 
   sessionPage=new Panel{Dock=DockStyle.Fill,Visible=false};var sessionLayout=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,RowCount=3};sessionLayout.ColumnStyles.Add(new(SizeType.Percent,100));sessionLayout.RowStyles.Add(new(SizeType.AutoSize));sessionLayout.RowStyles.Add(new(SizeType.AutoSize));sessionLayout.RowStyles.Add(new(SizeType.Percent,100));
   sessionHeading=Ui.Heading("Удалённый рабочий стол",16);sessionLayout.Controls.Add(sessionHeading,0,0);
-  var tools=Ui.Row();tools.Padding=new Padding(0,4,0,8);tools.Controls.Add(Ui.Label("Дисплей"));tools.Controls.Add(monitors);tools.Controls.Add(quality);fileButton=Ui.Button("Файлы",(_,_)=>OpenFiles());inputButton=Ui.Button("Ввести текст",async(_,_)=>{if(!CanControl)return;var value=Ui.Ask(this,"Ввести текст","Текст для активного окна на сервере");if(value!=null)await Send("text",new{text=value});});tools.Controls.Add(fileButton);tools.Controls.Add(inputButton);
+  var tools=Ui.Row();tools.Padding=new Padding(0,4,0,8);tools.Controls.Add(Ui.Label("Дисплей"));tools.Controls.Add(monitors);tools.Controls.Add(quality);fileButton=Ui.Button("Файлы",(_,_)=>OpenFiles());inputButton=Ui.Button("Ввести текст",async(_,_)=>{if(!CanControl)return;var value=Ui.Ask(this,"Ввести текст","Текст для активного окна на сервере");if(value!=null)await Send("text",new{text=value});});tools.Controls.Add(fileButton);tools.Controls.Add(inputButton);Ui.StyleCheck(clipboard);clipboard.Text="Буфер обмена";tools.Controls.Add(clipboard);
   chatButton=Ui.Button("Чат",(_,_)=>ToggleChat());tools.Controls.Add(chatButton);tools.Controls.Add(Ui.Button("Полный экран",(_,_)=>ToggleFullscreen()));tools.Controls.Add(Ui.Button("Только просмотр",async(_,_)=>{viewOnly.Checked=true;await Send("release",new{});}));sessionLayout.Controls.Add(tools,0,1);
   var desktop=Ui.FillGrid(2);desktop.ColumnStyles[0].Width=100;desktop.ColumnStyles[1].SizeType=SizeType.Absolute;desktop.ColumnStyles[1].Width=0;desktop.Controls.Add(screen,0,0);chatPane=new Panel{Dock=DockStyle.Fill,BackColor=Color.White,Padding=new Padding(16),Visible=false};Ui.StyleChat(chat);
   var chatTitle=Ui.Heading("Чат",14);chatTitle.Dock=DockStyle.Top;
@@ -50,28 +50,34 @@ public sealed partial class MainWindow {
   outgoing.KeyDown+=async(_,e)=>{if(e.KeyCode==Keys.Enter){e.SuppressKeyPress=true;await SendChat();}};code.KeyDown+=async(_,e)=>{if(e.KeyCode==Keys.Enter){e.SuppressKeyPress=true;await Connect();}};
   KeyPreview=true;KeyDown+=(_,e)=>{if(e.KeyCode==Keys.Escape&&FormBorderStyle==FormBorderStyle.None){ToggleFullscreen();e.Handled=true;e.SuppressKeyPress=true;}};
   foreach(var input in new[]{host,pin,code})input.TextChanged+=(_,_)=>input.BackColor=Color.White;
+  host.TextChanged+=(_,_)=>{if(!busy){pin.Clear();code.Clear();}};port.ValueChanged+=(_,_)=>{if(!busy){pin.Clear();code.Clear();}};
   layoutTimer.Tick+=(_,_)=>RefreshLayoutState();layoutTimer.Start();FormClosed+=(_,_)=>layoutTimer.Dispose();RefreshLayoutState();
  }
  void RefreshDeviceList(){
-  var filter=deviceSearch.Text.Trim();deviceList.BeginUpdate();deviceList.Items.Clear();foreach(var b in entries.Where(b=>filter.Length==0||b.Name.Contains(filter,StringComparison.OrdinalIgnoreCase)||b.Host.Contains(filter,StringComparison.OrdinalIgnoreCase)))deviceList.Items.Add(b);deviceList.EndUpdate();deviceEmpty.Visible=deviceList.Items.Count==0;deviceEmpty.Text=entries.Count==0?"Сохраните компьютер, чтобы в следующий раз не вводить адрес и ключ заново.":"Ничего не найдено. Попробуйте другое имя или адрес.";
+  var filter=deviceSearch.Text.Trim();deviceList.BeginUpdate();deviceList.Items.Clear();foreach(var b in entries.Where(b=>filter.Length==0||b.Name.Contains(filter,StringComparison.OrdinalIgnoreCase)||b.Host.Contains(filter,StringComparison.OrdinalIgnoreCase)))deviceList.Items.Add(b);deviceList.EndUpdate();deviceEmpty.Visible=deviceList.Items.Count==0;deviceEmpty.Text=entries.Count==0?"Сохраните компьютер, чтобы выбирать его из списка.":"Ничего не найдено. Попробуйте другое имя или адрес.";
  }
  void DrawDevice(object? sender,DrawItemEventArgs e){
   if(e.Index<0||e.Index>=deviceList.Items.Count)return;var b=(Bookmark)deviceList.Items[e.Index];bool selected=(e.State&DrawItemState.Selected)!=0;using var background=new SolidBrush(selected?Color.FromArgb(232,239,255):Color.White);e.Graphics.FillRectangle(background,e.Bounds);
   using var bold=new Font("Segoe UI",10,FontStyle.Bold);var title=new Rectangle(e.Bounds.X+12,e.Bounds.Y+10,e.Bounds.Width-22,24);TextRenderer.DrawText(e.Graphics,b.Name,bold,title,Ui.Ink,TextFormatFlags.EndEllipsis);var subtitle=new Rectangle(title.X,e.Bounds.Y+35,title.Width,22);TextRenderer.DrawText(e.Graphics,b.Host+":"+b.Port,Font,subtitle,Ui.Muted,TextFormatFlags.EndEllipsis);if((e.State&DrawItemState.Focus)!=0)e.DrawFocusRectangle();
  }
- void NewConnection(){if(busy)return;bookmarks.SelectedIndex=-1;deviceList.ClearSelected();host.Clear();pin.Clear();code.Clear();viewOnly.Checked=false;files.Checked=false;clipboard.Checked=false;status.Text="Введите данные или вставьте приглашение с сервера";host.Focus();}
+ void NewConnection(){if(busy)return;bookmarks.SelectedIndex=-1;deviceList.ClearSelected();host.Clear();pin.Clear();code.Clear();viewOnly.Checked=false;files.Checked=false;clipboard.Checked=false;status.Text="Введите адрес и порт сервера";host.Focus();}
  void PasteInvitation(){
   if(busy)return;try{var details=PairingLink.Parse(Clipboard.GetText());host.Text=details.Host;port.Value=details.Port;pin.Text=details.Fingerprint;code.Text=details.Code;status.Text="Приглашение заполнено. Проверьте адрес и нажмите «Подключиться».";connectButton.Focus();}catch(Exception e){status.Text=e is FormatException?e.Message:"Не удалось прочитать буфер обмена. Скопируйте приглашение ещё раз.";}
  }
  void RefreshLayoutState(){
   if(IsDisposed)return;bool connected=sessionId.Length>0&&channel!=null;if(connected)status.ForeColor=Ui.Success;else if(!status.Text.Contains("Введите")&&!status.Text.Contains("Нужен")&&!status.Text.Contains("Вставьте"))status.ForeColor=Ui.Muted;connectButton.Enabled=!busy;connectButton.Text=busy?"Подключение…":"Подключиться к компьютеру";disconnectButton.Visible=busy;disconnectButton.Text=connected?"Завершить сеанс":"Отменить подключение";
-  foreach(var c in new Control[]{host,port,pin,code,deviceList,deviceSearch,files,clipboard})c.Enabled=!busy;viewOnly.Enabled=!busy;
+  foreach(var c in new Control[]{host,port,pin,code,deviceList,deviceSearch,files})c.Enabled=!busy;viewOnly.Enabled=!busy;clipboard.Enabled=connected&&granted.HasFlag(Permissions.Clipboard);
   fileButton.Enabled=connected&&granted.HasFlag(Permissions.Files);inputButton.Enabled=connected&&CanControl;monitors.Enabled=connected;quality.Enabled=connected;sendButton.Enabled=connected&&granted.HasFlag(Permissions.Chat);
   if(connected!=wasConnected){wasConnected=connected;sessionPage.Visible=connected;connectionPage.Visible=!connected;if(connected){sessionPage.BringToFront();screen.Focus();}else{connectionPage.BringToFront();if(FormBorderStyle==FormBorderStyle.None)ToggleFullscreen();}}
   if(connected)sessionHeading.Text=host.Text+"  /  "+(CanControl?"Управление":"Только просмотр");
  }
  void ToggleChat(){chatPane.Visible=!chatPane.Visible;chatButton.Text="Чат";if(chatPane.Parent is TableLayoutPanel table)table.ColumnStyles[1].Width=chatPane.Visible?285:0;if(chatPane.Visible)outgoing.Focus();}
  void ToggleFullscreen(){bool full=FormBorderStyle!=FormBorderStyle.None;FormBorderStyle=full?FormBorderStyle.None:FormBorderStyle.Sizable;WindowState=full?FormWindowState.Maximized:FormWindowState.Normal;appRoot.ColumnStyles[0].Width=full?0:276;mainLayout.RowStyles[0].Height=full?0:68;}
+ void ForgetServerKey(){
+  if(busy||string.IsNullOrWhiteSpace(host.Text))return;
+  if(MessageBox.Show(this,"Забыть доверенный ключ для "+host.Text+":"+port.Value+"?\n\nСледующий вход потребует сверки и подтверждения нового ключа. Используйте это только после проверки причины его изменения у владельца сервера.","Сброс доверия",MessageBoxButtons.YesNo,MessageBoxIcon.Warning)!=DialogResult.Yes)return;
+  try{new ServerTrust(folder).Forget(host.Text,(int)port.Value);for(int i=0;i<entries.Count;i++)if(entries[i].Host.Equals(host.Text,StringComparison.OrdinalIgnoreCase)&&entries[i].Port==(int)port.Value)entries[i]=entries[i] with{Fingerprint=""};File.WriteAllText(Path.Combine(folder,"addressbook.json"),System.Text.Json.JsonSerializer.Serialize(entries));pin.Clear();RefreshBookmarks();status.Text="Ключ забыт. Перед следующим входом сверьте новый ключ с сервером.";}catch(Exception e){status.Text="Не удалось сбросить доверие: "+e.Message;}
+ }
  void FieldError(TextBox field,string message){field.BackColor=Color.FromArgb(255,238,240);status.ForeColor=Ui.Danger;status.Text=message;field.Focus();}
  static string ConnectionError(Exception error)=>error switch{
   System.Security.Authentication.AuthenticationException=>"Не удалось подтвердить сервер. Сверьте ключ безопасности и дату Windows.",

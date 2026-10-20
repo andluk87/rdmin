@@ -26,5 +26,17 @@ try{
  foreach(var invalid in new[]{"https://example.com", "remoteadmin://connect?host=test", "remoteadmin://connect?host=a&host=b"}){
   bool rejected=false;try{PairingLink.Parse(invalid);}catch(FormatException){rejected=true;}Check(rejected,"reject malformed invitation");
  }
+ var access=new ServerAccounts(root);
+ Check(access.AllowsAccounts&&!access.AllowsInvitations,"default authentication is server accounts");
+ var operator1=access.Put(null,"operator","Strong-test-password-123",Permissions.View|Permissions.Chat,false,true);
+ Check(access.Authenticate("OPERATOR","Strong-test-password-123")?.Id==operator1.Id,"account login accepts correct password and canonical login");
+ Check(access.Authenticate("operator","wrong-password")==null&&access.Authenticate("missing","Strong-test-password-123")==null,"wrong and unknown credentials rejected");
+ access.SaveSettings(5399,AuthenticationMode.Both,Permissions.View|Permissions.Chat);
+ var reopened=new ServerAccounts(root);
+ Check(reopened.Settings.Port==5399&&reopened.Authenticate("operator","Strong-test-password-123")?.RequireApproval==false,"account settings and explicit unattended policy survive reopen");
+ reopened.Put(operator1.Id,"operator",null,Permissions.View,true,false);
+ Check(reopened.Authenticate("operator","Strong-test-password-123")==null,"disabled account rejected without deleting verifier");
+ var limiter=new LoginLimiter();var now=DateTimeOffset.UtcNow;for(int i=0;i<5;i++)Check(limiter.Allow("192.0.2.1",now),"bounded auth attempt accepted");Check(!limiter.Allow("192.0.2.1",now)&&limiter.Allow("192.0.2.1",now.AddMinutes(2)),"rate limit expires");
+ var trust=new ServerTrust(root);trust.Remember("server",4899,new string('A',64));bool changedKey=false;try{trust.Remember("server",4899,new string('B',64));}catch(InvalidOperationException){changedKey=true;}Check(changedKey&&new ServerTrust(root).Get("SERVER",4899)==new string('A',64),"trusted server key cannot silently change");
  Console.WriteLine($"{passed} passed; 0 failed");
 }finally{Directory.Delete(root,true);}

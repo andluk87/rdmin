@@ -8,10 +8,10 @@ namespace RemoteAdmin.Shared;
 
 public static class LocalData {
  public static string Folder(string app){var p=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"RemoteAdmin",app);Directory.CreateDirectory(p);return p;}
- public static void Audit(string folder,string kind,string session,string outcome){
+ public static void Audit(string folder,string kind,string session,string outcome,string actor=""){
   // Never log pairing codes, keys, chat, clipboard, file contents, or input.
   var file=Path.Combine(folder,"audit.jsonl");if(File.Exists(file)&&new FileInfo(file).Length>10*1024*1024)File.Move(file,file+".previous",true);
-  File.AppendAllText(file,JsonSerializer.Serialize(new{at=DateTimeOffset.UtcNow,kind,session,outcome})+Environment.NewLine);
+  File.AppendAllText(file,JsonSerializer.Serialize(new{at=DateTimeOffset.UtcNow,kind,session,outcome,actor})+Environment.NewLine);
  }
 }
 public static class Identity {
@@ -28,6 +28,8 @@ public static class Identity {
   return new X509Certificate2(pfx,(string?)null,X509KeyStorageFlags.EphemeralKeySet);
  }
  public static string Fingerprint(X509Certificate2 cert)=>Convert.ToHexString(SHA256.HashData(cert.RawData));
+ public static byte[] Seal(byte[] data)=>Protect(data,true);
+ public static byte[] Unseal(byte[] data)=>Protect(data,false);
  public static string Code()=>Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
  public static bool Equal(string left,string right)=>CryptographicOperations.FixedTimeEquals(SHA256.HashData(Encoding.UTF8.GetBytes(left)),SHA256.HashData(Encoding.UTF8.GetBytes(right)));
  [StructLayout(LayoutKind.Sequential)] struct Blob {public int Size;public IntPtr Data;}
