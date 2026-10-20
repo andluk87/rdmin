@@ -76,7 +76,9 @@ public sealed partial class MainWindow : Form {
    phase="TLS";using(var deadline=CancellationTokenSource.CreateLinkedTokenSource(token)){deadline.CancelAfter(TimeSpan.FromSeconds(10));await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions{TargetHost=host.Text.Trim(),EnabledSslProtocols=SslProtocols.Tls12|SslProtocols.Tls13,CertificateRevocationCheckMode=X509RevocationMode.NoCheck},deadline.Token);}
    phase="server_trust";if(expected==null&&MessageBox.Show(this,$"Первое подключение к {host.Text}:{port.Value}\n\nSHA-256 сертификата:\n{presented}\n\nСверьте ключ с владельцем сервера по доверенному каналу. Сохранить доверие к этому серверу?","Подтвердите сервер",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)throw new OperationCanceledException();
    token.ThrowIfCancellationRequested();trust.Remember(host.Text,(int)port.Value,presented);pin.Text=presented;
-   await using var wire=new Channel(ssl);channel=wire;
+   // Keep the session channel private until the server grants access.
+   // Modal login dialogs fire Deactivate; those events must not send input during authentication.
+   await using var wire=new Channel(ssl);
    phase="authentication_options";var optionsMessage=await wire.Receive(token);if(optionsMessage.Type!="auth.options")throw new IOException("Сервер использует другой протокол входа. Обновите оба приложения до 0.3.0 или новее.");
    var options=optionsMessage.Read<AuthenticationOptions>();string mode="invitation",login="",secret="";
    if(options.Accounts&&code.Text.Length==0){
@@ -89,7 +91,7 @@ public sealed partial class MainWindow : Form {
    status.Text="Проверка учётных данных и прав на сервере…";
    Message first;using(var deadline=CancellationTokenSource.CreateLinkedTokenSource(token)){deadline.CancelAfter(TimeSpan.FromSeconds(75));first=await wire.Receive(deadline.Token,75);}
    if(first.Type!="welcome")throw new IOException(first.Data.TryGetProperty("message",out var error)?error.GetString():"Доступ отклонён");
-   phase="session";var welcome=first.Read<Welcome>();granted=welcome.Granted;sessionId=welcome.SessionId;monitors.Items.Clear();monitors.Items.AddRange(welcome.Displays.Select(d=>(object)$"{d.Index+1}: {d.Width}×{d.Height}").ToArray());if(monitors.Items.Count>0)monitors.SelectedIndex=0;
+   phase="session";var welcome=first.Read<Welcome>();granted=welcome.Granted;sessionId=welcome.SessionId;channel=wire;monitors.Items.Clear();monitors.Items.AddRange(welcome.Displays.Select(d=>(object)$"{d.Index+1}: {d.Width}×{d.Height}").ToArray());if(monitors.Items.Count>0)monitors.SelectedIndex=0;
    LocalData.Audit(folder,"session.start",sessionId,"connected");status.Text="Защищённое соединение · "+(granted.HasFlag(Permissions.Control)?"Управление разрешено":"Только просмотр");Ui.Hint(status,Ui.Rights(granted));RefreshLayoutState();
    heartbeat=Task.Run(async()=>{try{while(!token.IsCancellationRequested){await Task.Delay(10000,token);await wire.Send("ping",new{},token);}}catch{cts.Cancel();}},token);
    while(!token.IsCancellationRequested){var msg=await wire.Receive(token);switch(msg.Type){
@@ -107,7 +109,7 @@ public sealed partial class MainWindow : Form {
   finally{cts.Cancel();if(heartbeat!=null)try{await heartbeat;}catch{}foreach(var item in pending.Values)item.TrySetCanceled();pending.Clear();channel=null;granted=Permissions.None;connection=null;cts.Dispose();busy=false;screen.Frame=null;if(sessionId!=""){LocalData.Audit(folder,"session.end",sessionId,"closed");sessionId="";}if(!closing){RefreshLayoutState();status.Text+=" · отключено";}}
  }
  void Disconnect(){connection?.Cancel();}
- async Task Send(string type,object data){var wire=channel;var ct=connection;if(wire==null||ct==null)return;try{await wire.Send(type,data,ct.Token);}catch{ct.Cancel();}}
+ async Task Send(string type,object data){var wire=channel;var ct=connection;if(wire==null||ct==null||sessionId.Length==0)return;try{await wire.Send(type,data,ct.Token);}catch{ct.Cancel();}}
  async Task Mouse(string action,MouseEventArgs e){if(!CanControl)return;if(!screen.Coordinates(e.Location,out var x,out var y)){if(action=="up")await Send("release",new{});return;}int button=e.Button==MouseButtons.Right?1:e.Button==MouseButtons.Middle?2:0;await Send("mouse",new MouseEvent(action,x,y,button,e.Delta));}
  async Task Quality(){if(channel==null||monitors.SelectedIndex<0)return;var q=quality.SelectedIndex;await Send("quality",new Quality(monitors.SelectedIndex,q==0?5:q==2?20:10,q==0?35:q==2?85:65));}
  void OpenFiles(){if(channel==null||!granted.HasFlag(Permissions.Files)){status.Text="Передача файлов не разрешена сервером";return;}new FileWindow(RequestFile).Show(this);}

@@ -55,7 +55,10 @@ public sealed partial class MainWindow : Form {
   try{
    connectionPhase="authentication_options";await wire.Send("auth.options",new AuthenticationOptions(accounts.AllowsAccounts,accounts.AllowsInvitations),token);
    Message first;using(var deadline=CancellationTokenSource.CreateLinkedTokenSource(token)){deadline.CancelAfter(TimeSpan.FromSeconds(120));first=await wire.Receive(deadline.Token,120);}
-   connectionPhase="login";if(first.Type!="hello")throw new InvalidDataException("Ожидается сообщение входа");var hello=first.Read<Hello>();
+   connectionPhase="login.message_type";if(first.Type!="hello"){
+    await wire.Send("error",new{code="unexpected_before_login",message="До авторизации получена команда сеанса. Обновите клиент до версии 0.3.2 или новее."},token);return;
+   }
+   connectionPhase="login.parameters";var hello=first.Read<Hello>();
    const Permissions all=Permissions.View|Permissions.Control|Permissions.Files|Permissions.Clipboard|Permissions.Chat;
    if(hello.Operator.Length>128||hello.Username.Length>64||hello.Password.Length>256||(hello.Requested&~all)!=0)throw new InvalidDataException("Неверные параметры входа");
    var address=(tcp.Client.RemoteEndPoint as IPEndPoint)?.Address.ToString()??"unknown";
