@@ -40,7 +40,7 @@ public sealed partial class MainWindow {
 
   var security=Ui.Card("Безопасность подключения","Отпечаток подтверждает, что оператор подключается именно к этому компьютеру.");
   fingerprint.Font=new Font("Consolas",9);Ui.Add(security,Ui.Field("SHA-256 сертификата",fingerprint));
-  var settings=Ui.Row();settings.Controls.Add(Ui.Button("Копировать отпечаток",(_,_)=>CopyText(fingerprint.Text)));Ui.Add(security,settings);Ui.Add(leftStack,security);
+  var settings=Ui.Row();settings.Controls.Add(Ui.Button("Копировать отпечаток",(_,_)=>CopyText(fingerprint.Text)));settings.Controls.Add(Ui.Button("Диагностика",(_,_)=>{try{Process.Start(new ProcessStartInfo(folder){UseShellExecute=true});}catch(Exception e){status.Text=e.Message;}}));Ui.Add(security,settings);Ui.Add(leftStack,security);
 
   var right=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,RowCount=3,AutoScroll=true};right.ColumnStyles.Add(new(SizeType.Percent,100));right.RowStyles.Add(new(SizeType.AutoSize));right.RowStyles.Add(new(SizeType.AutoSize));right.RowStyles.Add(new(SizeType.Percent,100));columns.Controls.Add(right,1,0);
   var permissions=Ui.Card("Права разовой техподдержки","Эти ограничения применяются только к приглашениям. Права постоянных пользователей задаются в их учётных записях.");invitationRights=permissions;

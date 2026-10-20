@@ -17,7 +17,7 @@ public sealed partial class MainWindow : Form {
  readonly X509Certificate2 certificate;
  readonly ServerAccounts accounts;
  readonly LoginLimiter loginLimiter=new();
- string activeUser="";
+ string activeUser="",connectionPhase="accept";
  readonly string share=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),"RemoteAdminShare");
  CancellationTokenSource? running,session;
  TcpListener? listener;
@@ -42,18 +42,20 @@ public sealed partial class MainWindow : Form {
  void Start(){if(running!=null)return;if(!SaveAccessSettings())return;if(accounts.AllowsAccounts&&!accounts.AllowsInvitations&&!accounts.Accounts.Any(a=>a.Enabled)){status.Text="Создайте и включите хотя бы одну учётную запись сервера.";return;}try{listener=new(IPAddress.IPv6Any,(int)port.Value);listener.Server.DualMode=true;listener.Start(8);running=new();status.Text="Ожидание подключения · порт "+port.Value;port.Enabled=false;_ = AcceptLoop(running.Token);}catch(Exception e){listener?.Stop();listener=null;status.Text=e.Message;}}
  void Stop(){session?.Cancel();running?.Cancel();listener?.Stop();running=null;listener=null;if(!closing){status.Text="Доступ выключен";port.Enabled=true;}}
  async Task AcceptLoop(CancellationToken ct){
-  while(!ct.IsCancellationRequested){TcpClient? tcp=null;try{tcp=await listener!.AcceptTcpClientAsync(ct);tcp.NoDelay=true;using(tcp){await Serve(tcp,ct);}}catch(OperationCanceledException){break;}catch(Exception e){if(!closing)await Ui.OnUi(this,()=>{status.Text="Подключение завершено: "+e.Message;return true;});}finally{tcp?.Dispose();session=null;}}
+  while(!ct.IsCancellationRequested){TcpClient? tcp=null;try{tcp=await listener!.AcceptTcpClientAsync(ct);tcp.NoDelay=true;using(tcp){await Serve(tcp,ct);}}catch(OperationCanceledException) when(ct.IsCancellationRequested){break;}
+   catch(OperationCanceledException e){LocalData.Diagnostic(folder,"server",connectionPhase,e);if(!closing)status.Text="Сеанс отменён или истекло время ожидания. Сервер готов к следующему подключению.";}
+   catch(Exception e){LocalData.Diagnostic(folder,"server",connectionPhase,e);if(!closing)await Ui.OnUi(this,()=>{status.Text="Ошибка на этапе «"+connectionPhase+"»: "+e.GetType().Name+". Подробности: diagnostics.jsonl";return true;});}finally{tcp?.Dispose();session=null;}}
  }
  async Task Serve(TcpClient tcp,CancellationToken ct){
   // One connection at a time, bounded handshake and pairing deadlines.
   using var sessionCts=CancellationTokenSource.CreateLinkedTokenSource(ct);sessionCts.CancelAfter(TimeSpan.FromHours(1));session=sessionCts;var token=sessionCts.Token;
-  using var ssl=new SslStream(tcp.GetStream(),false);using(var deadline=CancellationTokenSource.CreateLinkedTokenSource(token)){deadline.CancelAfter(TimeSpan.FromSeconds(10));await ssl.AuthenticateAsServerAsync(new SslServerAuthenticationOptions{ServerCertificate=certificate,EnabledSslProtocols=SslProtocols.Tls12|SslProtocols.Tls13,ClientCertificateRequired=false,CertificateRevocationCheckMode=X509RevocationMode.NoCheck},deadline.Token);}
-  await using var wire=new Channel(ssl);using var input=new RemoteInput();using var sandbox=new FileSandbox(share);
+  connectionPhase="TLS";using var ssl=new SslStream(tcp.GetStream(),false);using(var deadline=CancellationTokenSource.CreateLinkedTokenSource(token)){deadline.CancelAfter(TimeSpan.FromSeconds(10));await ssl.AuthenticateAsServerAsync(new SslServerAuthenticationOptions{ServerCertificate=certificate,EnabledSslProtocols=SslProtocols.Tls12|SslProtocols.Tls13,ClientCertificateRequired=false,CertificateRevocationCheckMode=X509RevocationMode.NoCheck},deadline.Token);}
+  await using var wire=new Channel(ssl);using var input=new RemoteInput();FileSandbox? sandbox=null;
   Task? frames=null;Task? heartbeat=null;var approved=false;
   try{
-   await wire.Send("auth.options",new AuthenticationOptions(accounts.AllowsAccounts,accounts.AllowsInvitations),token);
+   connectionPhase="authentication_options";await wire.Send("auth.options",new AuthenticationOptions(accounts.AllowsAccounts,accounts.AllowsInvitations),token);
    Message first;using(var deadline=CancellationTokenSource.CreateLinkedTokenSource(token)){deadline.CancelAfter(TimeSpan.FromSeconds(120));first=await wire.Receive(deadline.Token,120);}
-   if(first.Type!="hello")return;var hello=first.Read<Hello>();
+   connectionPhase="login";if(first.Type!="hello")throw new InvalidDataException("Ожидается сообщение входа");var hello=first.Read<Hello>();
    const Permissions all=Permissions.View|Permissions.Control|Permissions.Files|Permissions.Clipboard|Permissions.Chat;
    if(hello.Operator.Length>128||hello.Username.Length>64||hello.Password.Length>256||(hello.Requested&~all)!=0)throw new InvalidDataException("Неверные параметры входа");
    var address=(tcp.Client.RemoteEndPoint as IPEndPoint)?.Address.ToString()??"unknown";
@@ -71,7 +73,7 @@ public sealed partial class MainWindow : Form {
    hello=hello with{Password="",Code=""};first=Message.Of("auth.consumed",new{});
    sessionId=Guid.NewGuid().ToString();granted=hello.Requested&allowed;
    if(granted==Permissions.None){await wire.Send("rejected",new{message="Для этой учётной записи не разрешены функции сеанса."},token);return;}
-   if(requiresApproval){
+   connectionPhase="local_approval";if(requiresApproval){
     approved=await Ui.OnUi(this,()=>{
      status.Text="Запрос от "+activeUser;
      return Ui.Consent(this,$"Пользователь: {activeUser}\nРазрешения: {Ui.Rights(granted)}\nРазрешить доступ на срок до 1 часа?\n\nВы можете завершить сеанс в любой момент.");
@@ -79,11 +81,11 @@ public sealed partial class MainWindow : Form {
    }else approved=true;
    if(!approved){await wire.Send("rejected",new{message="Доступ отклонён на сервере."},token);return;}
    status.Text="Сеанс активен · "+activeUser;
-   LocalData.Audit(folder,"session.start",sessionId,"approved",activeUser);channel=wire;monitor=0;fps=10;jpeg=65;
+   connectionPhase="session_start";LocalData.Audit(folder,"session.start",sessionId,"approved",activeUser);channel=wire;monitor=0;fps=10;jpeg=65;
    await wire.Send("welcome",new Welcome(sessionId,granted,DesktopCapture.Displays(),"DXGI / GDI fallback"),token);
    frames=Task.Run(async()=>{using var capture=new DesktopCapture();try{while(!token.IsCancellationRequested){if(granted.HasFlag(Permissions.View)){var frame=capture.Grab(Volatile.Read(ref monitor),Volatile.Read(ref jpeg));if(frame!=null)await wire.Send("frame",frame,token);}await Task.Delay(1000/Math.Clamp(Volatile.Read(ref fps),1,30),token);}}catch(Exception e){try{await wire.Send("error",new{message=e.Message},token);}catch{}sessionCts.Cancel();}},token);
    heartbeat=Task.Run(async()=>{try{while(!token.IsCancellationRequested){await Task.Delay(10000,token);await wire.Send("ping",new{},token);}}catch{sessionCts.Cancel();}},token);
-   while(!token.IsCancellationRequested){var msg=await wire.Receive(token);
+   connectionPhase="session";while(!token.IsCancellationRequested){var msg=await wire.Receive(token);
     switch(msg.Type){
      case "ping":await wire.Send("pong",new{},token);break;
      case "pong":break;
@@ -97,14 +99,18 @@ public sealed partial class MainWindow : Form {
      case "chat":Require(Permissions.Chat);var message=msg.Data.GetProperty("message").GetString()??"";if(message.Length>8192)throw new InvalidDataException();await Ui.OnUi(this,()=>{chat.AppendText($"{activeUser} · {DateTime.Now:HH:mm}\r\n{message}\r\n\r\n");return true;});break;
      case "clipboard":Require(Permissions.Clipboard);var value=msg.Data.GetProperty("text").GetString()??"";if(System.Text.Encoding.UTF8.GetByteCount(value)>1024*1024)throw new InvalidDataException();await Ui.OnUi(this,()=>{lastClipboard=value;if(value.Length==0)Clipboard.Clear();else Clipboard.SetText(value);return true;});break;
      case "file":Require(Permissions.Files);var cmd=msg.Read<FileCommand>();FileReply reply;try{
-      if(cmd.Op=="delete"&&requiresApproval&&!await Ui.OnUi(this,()=>MessageBox.Show(this,"Удалить из общей папки: "+cmd.Path+"?","Файловая операция",MessageBoxButtons.YesNo,MessageBoxIcon.Warning)==DialogResult.Yes))reply=new(false,"Удаление отклонено пользователем");else reply=await sandbox.Execute(cmd,token);
+      if(cmd.Op=="delete"&&requiresApproval&&!await Ui.OnUi(this,()=>MessageBox.Show(this,"Удалить из общей папки: "+cmd.Path+"?","Файловая операция",MessageBoxButtons.YesNo,MessageBoxIcon.Warning)==DialogResult.Yes))reply=new(false,"Удаление отклонено пользователем");else{sandbox??=new FileSandbox(share);reply=await sandbox.Execute(cmd,token);}
       LocalData.Audit(folder,"file."+cmd.Op,sessionId,reply.Ok?"success":"rejected");
      }catch(Exception e) when(e is IOException or UnauthorizedAccessException or FormatException){reply=new(false,e.Message);LocalData.Audit(folder,"file."+cmd.Op,sessionId,"failed");}await wire.Send("file.reply",reply,token,msg.Id);break;
      default:throw new InvalidDataException("Неизвестный тип сообщения");
     }
    }
+  }catch(Exception error) when(error is not OperationCanceledException){
+   // A TLS session exists: return a bounded, safe reason before closing the stream.
+   try{await wire.Send("error",new{code="server_session_error",message="Сервер завершил подключение на этапе «"+connectionPhase+"». Проверьте diagnostics.jsonl на сервере."},token);}catch{}
+   throw;
   }finally{
-   sessionCts.Cancel();input.Release();if(frames!=null)try{await frames;}catch{}if(heartbeat!=null)try{await heartbeat;}catch{}channel=null;session=null;
+   sessionCts.Cancel();input.Release();sandbox?.Dispose();if(frames!=null)try{await frames;}catch{}if(heartbeat!=null)try{await heartbeat;}catch{}channel=null;session=null;
    if(approved)LocalData.Audit(folder,"session.end",sessionId,"closed",activeUser);if(!closing)await Ui.OnUi(this,()=>{BackColor=Ui.Background;status.Text=running!=null?"Ожидание подключения":"Доступ выключен";NewCode();return true;});
   }
  }

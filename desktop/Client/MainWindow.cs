@@ -62,7 +62,7 @@ public sealed partial class MainWindow : Form {
   if(string.IsNullOrWhiteSpace(host.Text)){FieldError(host,"Введите IP-адрес или имя удалённого компьютера.");return;}
   if(pin.Text.Length>0&&!ValidPin(pin.Text)){FieldError(pin,"Ключ безопасности должен содержать 64 hex-символа.");return;}
   if(code.Text.Length>0&&(code.Text.Length!=32||!code.Text.All(Uri.IsHexDigit))){FieldError(code,"Код приглашения должен содержать 32 hex-символа.");return;}
-  busy=true;RefreshLayoutState();var cts=new CancellationTokenSource();connection=cts;var token=cts.Token;Task? heartbeat=null;
+  busy=true;RefreshLayoutState();var cts=new CancellationTokenSource();connection=cts;var token=cts.Token;Task? heartbeat=null;string phase="connect";
   try{
    status.Text="TLS: подключение и проверка сертификата…";using var tcp=new TcpClient();tcp.NoDelay=true;await tcp.ConnectAsync(host.Text.Trim(),(int)port.Value,token).AsTask().WaitAsync(TimeSpan.FromSeconds(10),token);
    var trust=new ServerTrust(folder);var trusted=trust.Get(host.Text,(int)port.Value);var supplied=NormalizePin(pin.Text);
@@ -73,11 +73,11 @@ public sealed partial class MainWindow : Form {
     // A first-use TLS channel is provisional: no credentials or session data are sent until explicit trust confirmation below.
     return DateTime.UtcNow>=x.NotBefore.ToUniversalTime()&&DateTime.UtcNow<=x.NotAfter.ToUniversalTime()&&(expected==null||Identity.Equal(expected,presented));
    });
-   using(var deadline=CancellationTokenSource.CreateLinkedTokenSource(token)){deadline.CancelAfter(TimeSpan.FromSeconds(10));await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions{TargetHost=host.Text.Trim(),EnabledSslProtocols=SslProtocols.Tls12|SslProtocols.Tls13,CertificateRevocationCheckMode=X509RevocationMode.NoCheck},deadline.Token);}
-   if(expected==null&&MessageBox.Show(this,$"Первое подключение к {host.Text}:{port.Value}\n\nSHA-256 сертификата:\n{presented}\n\nСверьте ключ с владельцем сервера по доверенному каналу. Сохранить доверие к этому серверу?","Подтвердите сервер",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)throw new OperationCanceledException();
+   phase="TLS";using(var deadline=CancellationTokenSource.CreateLinkedTokenSource(token)){deadline.CancelAfter(TimeSpan.FromSeconds(10));await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions{TargetHost=host.Text.Trim(),EnabledSslProtocols=SslProtocols.Tls12|SslProtocols.Tls13,CertificateRevocationCheckMode=X509RevocationMode.NoCheck},deadline.Token);}
+   phase="server_trust";if(expected==null&&MessageBox.Show(this,$"Первое подключение к {host.Text}:{port.Value}\n\nSHA-256 сертификата:\n{presented}\n\nСверьте ключ с владельцем сервера по доверенному каналу. Сохранить доверие к этому серверу?","Подтвердите сервер",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)throw new OperationCanceledException();
    token.ThrowIfCancellationRequested();trust.Remember(host.Text,(int)port.Value,presented);pin.Text=presented;
    await using var wire=new Channel(ssl);channel=wire;
-   var optionsMessage=await wire.Receive(token);if(optionsMessage.Type!="auth.options")throw new IOException("Сервер использует другой протокол входа. Обновите оба приложения до 0.3.0 или новее.");
+   phase="authentication_options";var optionsMessage=await wire.Receive(token);if(optionsMessage.Type!="auth.options")throw new IOException("Сервер использует другой протокол входа. Обновите оба приложения до 0.3.0 или новее.");
    var options=optionsMessage.Read<AuthenticationOptions>();string mode="invitation",login="",secret="";
    if(options.Accounts&&code.Text.Length==0){
     using var dialog=new LoginWindow(host.Text,lastUsername);if(dialog.ShowDialog(this)!=DialogResult.OK)throw new OperationCanceledException();login=dialog.Username;secret=dialog.Password;lastUsername=login;dialog.ClearSecret();mode="account";
@@ -85,11 +85,11 @@ public sealed partial class MainWindow : Form {
    else if(code.Text.Length==0){var inviteCode=Ui.Ask(this,"Разовая техподдержка","Введите код, показанный на сервере");if(inviteCode==null)throw new OperationCanceledException();code.Text=inviteCode.Replace(" ","").Replace("-","").Trim().ToUpperInvariant();}
    const Permissions all=Permissions.View|Permissions.Control|Permissions.Files|Permissions.Clipboard|Permissions.Chat;
    var requested=viewOnly.Checked?all&~Permissions.Control:all;
-   try{await wire.Send("hello",new Hello(code.Text,Environment.UserName,requested,mode,login,secret),token);}finally{secret="";code.Clear();}
+   phase="login";try{await wire.Send("hello",new Hello(code.Text,Environment.UserName,requested,mode,login,secret),token);}finally{secret="";code.Clear();}
    status.Text="Проверка учётных данных и прав на сервере…";
    Message first;using(var deadline=CancellationTokenSource.CreateLinkedTokenSource(token)){deadline.CancelAfter(TimeSpan.FromSeconds(75));first=await wire.Receive(deadline.Token,75);}
    if(first.Type!="welcome")throw new IOException(first.Data.TryGetProperty("message",out var error)?error.GetString():"Доступ отклонён");
-   var welcome=first.Read<Welcome>();granted=welcome.Granted;sessionId=welcome.SessionId;monitors.Items.Clear();monitors.Items.AddRange(welcome.Displays.Select(d=>(object)$"{d.Index+1}: {d.Width}×{d.Height}").ToArray());if(monitors.Items.Count>0)monitors.SelectedIndex=0;
+   phase="session";var welcome=first.Read<Welcome>();granted=welcome.Granted;sessionId=welcome.SessionId;monitors.Items.Clear();monitors.Items.AddRange(welcome.Displays.Select(d=>(object)$"{d.Index+1}: {d.Width}×{d.Height}").ToArray());if(monitors.Items.Count>0)monitors.SelectedIndex=0;
    LocalData.Audit(folder,"session.start",sessionId,"connected");status.Text="Защищённое соединение · "+(granted.HasFlag(Permissions.Control)?"Управление разрешено":"Только просмотр");Ui.Hint(status,Ui.Rights(granted));RefreshLayoutState();
    heartbeat=Task.Run(async()=>{try{while(!token.IsCancellationRequested){await Task.Delay(10000,token);await wire.Send("ping",new{},token);}}catch{cts.Cancel();}},token);
    while(!token.IsCancellationRequested){var msg=await wire.Receive(token);switch(msg.Type){
@@ -103,7 +103,7 @@ public sealed partial class MainWindow : Form {
     case "terminate":return;
     default:throw new InvalidDataException("Неизвестный ответ сервера");
    }}
-  }catch(OperationCanceledException){if(!closing)status.Text="Соединение завершено";}catch(Exception e){if(!closing)status.Text=ConnectionError(e);}
+  }catch(OperationCanceledException){if(!closing)status.Text="Соединение завершено";}catch(Exception e){LocalData.Diagnostic(folder,"client",phase,e);if(!closing)status.Text=(e is EndOfStreamException||e is IOException&&e.Message.Contains("EOF",StringComparison.OrdinalIgnoreCase))?"Сервер закрыл соединение на этапе «"+phase+"». Проверьте версию сервера и diagnostics.jsonl на сервере.":ConnectionError(e);}
   finally{cts.Cancel();if(heartbeat!=null)try{await heartbeat;}catch{}foreach(var item in pending.Values)item.TrySetCanceled();pending.Clear();channel=null;granted=Permissions.None;connection=null;cts.Dispose();busy=false;screen.Frame=null;if(sessionId!=""){LocalData.Audit(folder,"session.end",sessionId,"closed");sessionId="";}if(!closing){RefreshLayoutState();status.Text+=" · отключено";}}
  }
  void Disconnect(){connection?.Cancel();}

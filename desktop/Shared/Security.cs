@@ -8,6 +8,14 @@ namespace RemoteAdmin.Shared;
 
 public static class LocalData {
  public static string Folder(string app){var p=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"RemoteAdmin",app);Directory.CreateDirectory(p);return p;}
+ public static void Diagnostic(string folder,string component,string phase,Exception error){
+  // Record types and native codes only: exception text can include received JSON/passwords.
+  try{
+   var causes=new List<object>();for(Exception? current=error;current!=null&&causes.Count<5;current=current.InnerException)causes.Add(new{type=current.GetType().FullName,hresult=$"0x{current.HResult:X8}",socket=current is System.Net.Sockets.SocketException socket?socket.SocketErrorCode.ToString():null});
+   var path=Path.Combine(folder,"diagnostics.jsonl");if(File.Exists(path)&&new FileInfo(path).Length>2*1024*1024)File.Move(path,path+".previous",true);
+   File.AppendAllText(path,JsonSerializer.Serialize(new{at=DateTimeOffset.UtcNow,component,phase,causes})+Environment.NewLine);
+  }catch{ /* Diagnostic failure must not stop accepting connections. */ }
+ }
  public static void Audit(string folder,string kind,string session,string outcome,string actor=""){
   // Never log pairing codes, keys, chat, clipboard, file contents, or input.
   var file=Path.Combine(folder,"audit.jsonl");if(File.Exists(file)&&new FileInfo(file).Length>10*1024*1024)File.Move(file,file+".previous",true);
@@ -16,8 +24,12 @@ public static class LocalData {
 }
 public static class Identity {
  public static X509Certificate2 Load(string folder){
+  // Schannel needs an imported CurrentUser key container for inbound TLS.
+  // EphemeralKeySet can fail with SEC_E_NO_CREDENTIALS on Windows.
+  // Omit PersistKeySet: temporary imported containers are removed on disposal.
+
   var path=Path.Combine(folder,"identity.dpapi");
-  if(File.Exists(path))return new X509Certificate2(Protect(File.ReadAllBytes(path),false),(string?)null,X509KeyStorageFlags.EphemeralKeySet);
+  if(File.Exists(path))return new X509Certificate2(Protect(File.ReadAllBytes(path),false),(string?)null,X509KeyStorageFlags.UserKeySet);
   using var key=ECDsa.Create(ECCurve.NamedCurves.nistP256);
   var req=new CertificateRequest("CN=RemoteAdmin-"+Environment.MachineName,key,HashAlgorithmName.SHA256);
   req.CertificateExtensions.Add(new X509BasicConstraintsExtension(false,false,0,true));
@@ -25,7 +37,7 @@ public static class Identity {
   var eku=new System.Security.Cryptography.OidCollection();eku.Add(new("1.3.6.1.5.5.7.3.1"));req.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(eku,false));
   using var cert=req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1),DateTimeOffset.UtcNow.AddYears(2));
   var pfx=cert.Export(X509ContentType.Pfx);File.WriteAllBytes(path,Protect(pfx,true));
-  return new X509Certificate2(pfx,(string?)null,X509KeyStorageFlags.EphemeralKeySet);
+  return new X509Certificate2(pfx,(string?)null,X509KeyStorageFlags.UserKeySet);
  }
  public static string Fingerprint(X509Certificate2 cert)=>Convert.ToHexString(SHA256.HashData(cert.RawData));
  public static byte[] Seal(byte[] data)=>Protect(data,true);
