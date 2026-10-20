@@ -18,7 +18,7 @@ public sealed partial class FileWindow {
    view.Resize+=(_,_)=>{if(view.Columns.Count==2)view.Columns[0].Width=Math.Max(160,view.ClientSize.Width-145);};view.SelectedIndexChanged+=(_,_)=>UpdateFileActions();
   }
   var actions=Ui.Row();actions.Padding=new Padding(0,14,0,0);
-  uploadButton=ViewerViewerUi.Button("На сервер →",async(_,_)=>await Run(Upload));downloadButton=ViewerViewerUi.Button("← На компьютер",async(_,_)=>await Run(Download));renameButton=ViewerUi.Button("Переименовать",async(_,_)=>await Run(Rename));deleteButton=ViewerViewerUi.Button("Удалить",async(_,_)=>await Run(Delete));
+  uploadButton=ViewerUi.Button("На сервер →",async(_,_)=>await Run(Upload));downloadButton=ViewerUi.Button("← На компьютер",async(_,_)=>await Run(Download));renameButton=ViewerUi.Button("Переименовать",async(_,_)=>await Run(Rename));deleteButton=ViewerUi.Button("Удалить",async(_,_)=>await Run(Delete));
   var mkdir=ViewerUi.Button("Новая папка",async(_,_)=>await Run(Mkdir));cancelTransfer=ViewerUi.Button("Отменить передачу",(_,_)=>operation?.Cancel());foreach(var button in new[]{uploadButton,downloadButton,mkdir,renameButton,deleteButton}){fileActions.Add(button);actions.Controls.Add(button);}actions.Controls.Add(cancelTransfer);root.Controls.Add(actions,0,2);
   var bottom=Ui.Stack();bottom.Dock=DockStyle.Fill;Ui.Add(bottom,transferProgress);progress.AutoSize=false;progress.Height=36;progress.TextAlign=ContentAlignment.MiddleLeft;progress.ForeColor=Ui.Muted;Ui.Add(bottom,progress);root.Controls.Add(bottom,0,3);Controls.Add(root);
   FormClosed+=(_,_)=>fileIcons.Dispose();SetOperationState(false);
