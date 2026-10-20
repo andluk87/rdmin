@@ -9,7 +9,7 @@ using RemoteAdmin.Shared;
 using Channel=RemoteAdmin.Shared.Channel;
 
 namespace RemoteAdmin.Client;
-public sealed record Bookmark(string Name,string Host,int Port,string Fingerprint);
+public sealed record Bookmark(string Name,string Host,int Port,string Fingerprint,string Folder="");
 public sealed partial class MainWindow : Form {
  readonly string folder=LocalData.Folder("Client");
  readonly TextBox host=Ui.Text("",180),pin=Ui.Text("",510),code=Ui.Text("",280),outgoing=Ui.Text("",350);
@@ -95,7 +95,7 @@ public sealed partial class MainWindow : Form {
    LocalData.Audit(folder,"session.start",sessionId,"connected");status.Text="Защищённое соединение · "+(granted.HasFlag(Permissions.Control)?"Управление разрешено":"Только просмотр");Ui.Hint(status,Ui.Rights(granted));RefreshLayoutState();
    heartbeat=Task.Run(async()=>{try{while(!token.IsCancellationRequested){await Task.Delay(10000,token);await wire.Send("ping",new{},token);}}catch{cts.Cancel();}},token);
    while(!token.IsCancellationRequested){var msg=await wire.Receive(token);switch(msg.Type){
-    case "frame":var frame=msg.Read<ScreenFrame>();var data=Convert.FromBase64String(frame.Jpeg);using(var ms=new MemoryStream(data))using(var image=Image.FromStream(ms)){if(image.Width>7680||image.Height>4320)throw new InvalidDataException("Слишком большой кадр");screen.Frame=new Bitmap(image);}break;
+    case "frame":var frame=msg.Read<ScreenFrame>();var data=Convert.FromBase64String(frame.Jpeg);using(var ms=new MemoryStream(data))using(var image=Image.FromStream(ms)){if(image.Width>7680||image.Height>4320)throw new InvalidDataException("Слишком большой кадр");screen.Frame=new Bitmap(image);UpdateScale();}break;
     case "ping":await wire.Send("pong",new{},token);break;
     case "pong":break;
     case "chat":var text=msg.Data.GetProperty("message").GetString()??"";if(text.Length>8192)throw new InvalidDataException();chat.AppendText($"Сервер · {DateTime.Now:HH:mm}\r\n{text}\r\n\r\n");break;

@@ -34,12 +34,12 @@ public sealed partial class MainWindow : Form {
   accounts=new ServerAccounts(folder);port.Value=accounts.Settings.Port;
   fingerprint.Text=Identity.Fingerprint(certificate);fingerprint.ReadOnly=true;code.ReadOnly=true;
   BuildLayout();
-  control.CheckedChanged+=(_,_)=>SaveAccessSettings();files.CheckedChanged+=(_,_)=>SaveAccessSettings();clipboard.CheckedChanged+=(_,_)=>SaveAccessSettings();
+
   clipboardTimer.Tick+=async(_,_)=>{if(channel==null||session==null||!granted.HasFlag(Permissions.Clipboard))return;try{if(Clipboard.ContainsText()){var s=Clipboard.GetText();if(s!=lastClipboard&&System.Text.Encoding.UTF8.GetByteCount(s)<=1024*1024){lastClipboard=s;await channel.Send("clipboard",new{text=s},session.Token);}}}catch{}};clipboardTimer.Start();
-  FormClosing+=(_,_)=>{closing=true;Stop();certificate.Dispose();clipboardTimer.Dispose();};NewCode();
+  FormClosing+=(_,e)=>{if(e.Cancel)return;closing=true;Stop();certificate.Dispose();clipboardTimer.Dispose();};NewCode();
  }
  void NewCode(){pairing=Identity.Code();code.Text=pairing;codeExpires=DateTimeOffset.UtcNow.AddMinutes(5);}
- void Start(){if(running!=null)return;if(!SaveAccessSettings())return;if(accounts.AllowsAccounts&&!accounts.AllowsInvitations&&!accounts.Accounts.Any(a=>a.Enabled)){status.Text="Создайте и включите хотя бы одну учётную запись сервера.";return;}try{listener=new(IPAddress.IPv6Any,(int)port.Value);listener.Server.DualMode=true;listener.Start(8);running=new();status.Text="Ожидание подключения · порт "+port.Value;port.Enabled=false;_ = AcceptLoop(running.Token);}catch(Exception e){listener?.Stop();listener=null;status.Text=e.Message;}}
+ void Start(){if(running!=null)return;if(accounts.AllowsAccounts&&!accounts.AllowsInvitations&&!accounts.Accounts.Any(a=>a.Enabled)){status.Text="Создайте и включите хотя бы одну учётную запись сервера.";return;}try{listener=new(IPAddress.IPv6Any,(int)port.Value);listener.Server.DualMode=true;listener.Start(8);running=new();status.Text="Ожидание подключения · порт "+port.Value;port.Enabled=false;_ = AcceptLoop(running.Token);}catch(Exception e){listener?.Stop();listener=null;status.Text=e.Message;}}
  void Stop(){session?.Cancel();running?.Cancel();listener?.Stop();running=null;listener=null;if(!closing){status.Text="Доступ выключен";port.Enabled=true;}}
  async Task AcceptLoop(CancellationToken ct){
   while(!ct.IsCancellationRequested){TcpClient? tcp=null;try{tcp=await listener!.AcceptTcpClientAsync(ct);tcp.NoDelay=true;using(tcp){await Serve(tcp,ct);}}catch(OperationCanceledException) when(ct.IsCancellationRequested){break;}
@@ -66,7 +66,7 @@ public sealed partial class MainWindow : Form {
    bool correct=false,requiresApproval=true;Permissions allowed=Permissions.None;activeUser="";
    if(hello.AuthMode=="account"&&accounts.AllowsAccounts){
     var account=await Task.Run(()=>accounts.Authenticate(hello.Username,hello.Password)).WaitAsync(token);
-    if(account!=null){correct=true;activeUser=account.Username;allowed=account.Rights;requiresApproval=account.RequireApproval;}
+    if(account!=null){correct=true;activeUser=account.Username;allowed=account.Rights;requiresApproval=false;}
    }else if(hello.AuthMode=="invitation"&&accounts.AllowsInvitations){
     correct=await Ui.OnUi(this,()=>{bool valid=pairing.Length==32&&DateTimeOffset.UtcNow<codeExpires&&Identity.Equal(pairing,hello.Code);if(valid){pairing="";code.Text="Код использован";}return valid;});
     allowed=accounts.Settings.SupportRights;activeUser="Техподдержка / "+hello.Operator;

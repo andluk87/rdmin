@@ -4,7 +4,8 @@ using System.Text.Json;
 
 namespace RemoteAdmin.Shared;
 public enum AuthenticationMode { Accounts, Invitation, Both }
-public sealed record ServerAccount(string Id,string Username,string Salt,string PasswordHash,int Iterations,Permissions Rights,bool RequireApproval=true,bool Enabled=true);
+public sealed record ServerAccount(string Id,string Username,string Salt,string PasswordHash,int Iterations,Permissions Rights,bool RequireApproval=false,bool Enabled=true);
+public sealed record AccountPolicy(Permissions Rights,bool Enabled);
 public sealed record ServerSettings(int Port=4899,AuthenticationMode Authentication=AuthenticationMode.Accounts,Permissions SupportRights=Permissions.View|Permissions.Control|Permissions.Chat,ServerAccount[]? Accounts=null);
 
 public sealed class ServerAccounts {
@@ -19,6 +20,7 @@ public sealed class ServerAccounts {
   path=Path.Combine(folder,"access.dpapi");
   Settings=File.Exists(path)?JsonSerializer.Deserialize<ServerSettings>(Identity.Unseal(File.ReadAllBytes(path)),Wire.Json)??throw new InvalidDataException("Повреждены настройки доступа"):new();
   if(Settings.Port<1024||Settings.Port>65535||!Enum.IsDefined(Settings.Authentication)||Accounts.Length>100||Accounts.Any(a=>!ValidUsername(a.Username)||a.Iterations!=PasswordIterations))throw new InvalidDataException("Некорректные настройки доступа");
+  Settings=Settings with{Accounts=Accounts.Select(a=>a with{RequireApproval=false}).ToArray()};
  }
  public void SaveSettings(int port,AuthenticationMode mode,Permissions support){
   if(port<1024||port>65535||!Enum.IsDefined(mode))throw new ArgumentException("Недопустимые настройки сервера");Save(Settings with{Port=port,Authentication=mode,SupportRights=support});
@@ -35,8 +37,13 @@ public sealed class ServerAccounts {
    if(password.Length<12||password.Length>256)throw new ArgumentException("Пароль должен содержать от 12 до 256 символов.");
    var bytes=RandomNumberGenerator.GetBytes(16);salt=Convert.ToBase64String(bytes);hash=Convert.ToBase64String(Rfc2898DeriveBytes.Pbkdf2(password,bytes,PasswordIterations,HashAlgorithmName.SHA256,32));
   }else if(old!=null){salt=old.Salt;hash=old.PasswordHash;}else throw new ArgumentException("Укажите пароль новой учётной записи.");
-  var account=new ServerAccount(old?.Id??Guid.NewGuid().ToString(),username,salt,hash,PasswordIterations,rights,approval,enabled);
+  var account=new ServerAccount(old?.Id??Guid.NewGuid().ToString(),username,salt,hash,PasswordIterations,rights,false,enabled);
   Save(Settings with{Accounts=Accounts.Where(a=>a.Id!=account.Id).Append(account).ToArray()});return account;
+ }
+ public void SetPolicies(IReadOnlyDictionary<string,AccountPolicy> policies){
+  const Permissions all=Permissions.View|Permissions.Control|Permissions.Files|Permissions.Chat|Permissions.Clipboard;
+  foreach(var policy in policies.Values)if((policy.Rights&~all)!=0||(policy.Rights.HasFlag(Permissions.Control)&&!policy.Rights.HasFlag(Permissions.View)))throw new ArgumentException("Для управления нужен просмотр экрана.");
+  Save(Settings with{Accounts=Accounts.Select(a=>policies.TryGetValue(a.Id,out var policy)?a with{Rights=policy.Rights,Enabled=policy.Enabled,RequireApproval=false}:a).ToArray()});
  }
  public void Delete(string id)=>Save(Settings with{Accounts=Accounts.Where(a=>a.Id!=id).ToArray()});
  public ServerAccount? Authenticate(string username,string password){

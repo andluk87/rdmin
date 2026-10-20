@@ -29,6 +29,8 @@ try{
  var access=new ServerAccounts(root);
  Check(access.AllowsAccounts&&!access.AllowsInvitations,"default authentication is server accounts");
  var operator1=access.Put(null,"operator","Strong-test-password-123",Permissions.View|Permissions.Chat,false,true);
+ var migrated=access.Put(null,"olduser","Strong-test-password-456",Permissions.View,true,true);
+ Check(access.Authenticate("olduser","Strong-test-password-456")?.RequireApproval==false,"account password login never requires local confirmation");
  Check(access.Authenticate("OPERATOR","Strong-test-password-123")?.Id==operator1.Id,"account login accepts correct password and canonical login");
  Check(access.Authenticate("operator","wrong-password")==null&&access.Authenticate("missing","Strong-test-password-123")==null,"wrong and unknown credentials rejected");
  access.SaveSettings(5399,AuthenticationMode.Both,Permissions.View|Permissions.Chat);

@@ -43,7 +43,9 @@ def package_app(app):
     condition = element(product, 'Condition', Message='A newer version of this application is already installed.')
     condition.text = 'Installed OR NOT NEWERVERSIONDETECTED'
     sequence = element(product, 'InstallExecuteSequence')
-    remove = element(sequence, 'RemoveExistingProducts', After='InstallInitialize')
+    # Install the new files before retiring the previous product. Stable component
+    # GUIDs protect shared files; the installer transaction can roll back on error.
+    remove = element(sequence, 'RemoveExistingProducts', After='InstallExecute')
     remove.text = 'PREVIOUSVERSIONSINSTALLED'
 
     target = element(product, 'Directory', Id='TARGETDIR', Name='SourceDir')
