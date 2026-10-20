@@ -16,4 +16,5 @@ echo "Build RUN network: $build_network"
 echo "Building with $build_jobs available CPU threads (BuildKit parallel stages)."
 DOCKER_BUILDKIT=1 docker build --network "$build_network" --progress=plain --build-arg "BUILD_JOBS=$build_jobs" --target artifacts --output "type=local,dest=$artifact_dir" "$project_dir" 2>&1 | tee "$artifact_dir/remoteadmin-build.log"
 (cd -- "$artifact_dir" && sha256sum -c SHA256SUMS)
+cat -- "$artifact_dir/SIZE-REPORT.txt"
 echo "Windows artifacts: $artifact_dir"

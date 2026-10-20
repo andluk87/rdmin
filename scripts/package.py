@@ -2,6 +2,7 @@
 """Executed by the VPS build container, never by onboarding."""
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import json
 import pathlib
 import shutil
 import subprocess
@@ -29,10 +30,18 @@ def package_app(app):
     name = 'RemoteAdmin'+app
     print(f'[{name}] preparing MSI', flush=True)
     folder = out / name
-    shutil.copytree(documentation, folder, dirs_exist_ok=True)
+    # Documentation belongs in its own artifact, not beside every runtime DLL.
+    payload = list(folder.iterdir())
+    unexpected = [p.name for p in payload if p.name != name+'.exe']
+    if unexpected or not (folder/(name+'.exe')).is_file():
+        raise RuntimeError(f'{name}: expected single EXE, unexpected publish output: {unexpected}')
+    icon_source = pathlib.Path(__file__).resolve().parents[1]/'desktop'/'Assets'/('server.ico' if app=='Server' else 'viewer.ico')
+    shutil.copyfile(icon_source, out/(name+'.ico'))
     wix = ET.Element('{'+NS+'}Wix')
     product = element(wix, 'Product', Id=stable(name+'/product/'+VERSION), Name=name, Language='1033', Version=VERSION, Manufacturer='RemoteAdmin', UpgradeCode=stable(name+'/upgrade'))
     element(product, 'Package', InstallerVersion='500', Compressed='yes', InstallScope='perMachine', Description=name+' interactive application')
+    element(product, 'Icon', Id='AppIcon', SourceFile=name+'.ico')
+    element(product, 'Property', Id='ARPPRODUCTICON', Value='AppIcon')
     element(product, 'Media', Id='1', Cabinet=name+'.cab', EmbedCab='yes')
     # Keep the original UpgradeCode and component GUID namespace across releases.
     upgrade = element(product, 'Upgrade', Id=stable(name+'/upgrade'))
@@ -81,18 +90,56 @@ def package_app(app):
     ET.ElementTree(wix).write(manifest, encoding='utf-8', xml_declaration=True)
     subprocess.run(['wixl', '-a', 'x64', '-o', str(artifacts/(name+'-'+VERSION+'-win-x64.msi')), manifest.name], cwd=out, check=True)
     print(f'[{name}] MSI done in {time.monotonic()-started:.1f}s; preparing ZIP', flush=True)
-    with zipfile.ZipFile(artifacts/(name+'-'+VERSION+'-win-x64.zip'), 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
+    with zipfile.ZipFile(artifacts/(name+'-'+VERSION+'-win-x64.zip'), 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for file in sorted(folder.rglob('*')):
             if file.is_file():
                 archive.write(file, str(pathlib.Path(name)/file.relative_to(folder)))
+    setup = artifacts / (name+'-'+VERSION+'-Setup.exe')
+    subprocess.run(['makensis', '-V2', '-INPUTCHARSET', 'UTF8',
+                    '-DAPPNAME='+name, '-DVERSION='+VERSION,
+                    '-DICON_PATH='+str(pathlib.Path(__file__).resolve().parents[1]/'desktop'/'Assets'/('server.ico' if app=='Server' else 'viewer.ico')),
+                    '-DUPGRADE_CODE={'+stable(name+'/upgrade')+'}',
+                    '-DMSI_PATH='+str(artifacts/(name+'-'+VERSION+'-win-x64.msi')),
+                    '-DSETUP_OUTPUT='+str(setup),
+                    str(pathlib.Path(__file__).resolve().parents[1]/'installer'/'setup.nsi')], check=True)
     print(f'[{name}] packaging complete in {time.monotonic()-started:.1f}s', flush=True)
 
 # Separate MSI and ZIP work for Server/Client can use CPU concurrently.
 with ThreadPoolExecutor(max_workers=2) as pool:
     list(pool.map(package_app, ('Server', 'Client')))
 
+with zipfile.ZipFile(artifacts/('RemoteAdmin-'+VERSION+'-docs.zip'), 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+    for file in sorted(documentation.rglob('*')):
+        if file.is_file():
+            archive.write(file, file.relative_to(documentation))
+
 with (artifacts/'SHA256SUMS').open('w') as checksums:
     for file in sorted(artifacts.iterdir()):
-        if file.suffix in ('.zip', '.msi'):
+        if file.suffix in ('.zip', '.msi', '.exe'):
             with file.open('rb') as stream:
                 checksums.write(hashlib.file_digest(stream, 'sha256').hexdigest()+'  '+file.name+'\n')
+
+# Actual sizes are measured only after the VPS has built both applications.
+report = {'version': VERSION, 'applications': {}}
+lines = [f'RemoteAdmin {VERSION}: actual VPS artifact sizes',
+         'MiB = 1048576 bytes. Each EXE includes its own .NET runtime.', '']
+for app in ('Server', 'Client'):
+    name = 'RemoteAdmin'+app
+    files = {'installed_exe': out/name/(name+'.exe'),
+             'portable_zip': artifacts/(name+'-'+VERSION+'-win-x64.zip'),
+             'msi': artifacts/(name+'-'+VERSION+'-win-x64.msi'),
+             'setup_exe': artifacts/(name+'-'+VERSION+'-Setup.exe')}
+    sizes = {label: file.stat().st_size for label, file in files.items()}
+    report['applications'][app] = {'installed_files': 1, 'bytes': sizes}
+    lines.append(name+' (1 installed EXE):')
+    for label, size in sizes.items():
+        lines.append(f'  {label}: {size:,} bytes / {size/1048576:.2f} MiB')
+server = report['applications']['Server']['bytes']['installed_exe']
+client = report['applications']['Client']['bytes']['installed_exe']
+report['server_minus_client_bytes'] = server-client
+lines.extend(['', f'Server minus Client EXE: {server-client:+,} bytes / {(server-client)/1048576:+.2f} MiB',
+              'Similar sizes are expected: both applications embed the Windows Desktop .NET runtime.',
+              'Native runtime libraries are extracted on first launch; this report does not measure extraction/cache disk usage.'])
+(artifacts/'SIZE-REPORT.json').write_text(json.dumps(report, indent=2)+'\n', encoding='utf-8')
+(artifacts/'SIZE-REPORT.txt').write_text('\n'.join(lines)+'\n', encoding='utf-8')
+print('\n'.join(lines), flush=True)

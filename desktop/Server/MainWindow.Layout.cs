@@ -7,7 +7,7 @@ namespace RemoteAdmin.Server;
 public sealed partial class MainWindow {
  readonly System.Windows.Forms.Timer stateTimer=new(){Interval=1000};
  readonly Label stateLabel=Classic.Label(""),sessionLabel=Classic.Label("");
- readonly NotifyIcon tray=new(){Icon=SystemIcons.Application,Text="RemoteAdmin Server"};
+ readonly NotifyIcon tray=new(){Icon=RemoteAdmin.Shared.Ui.AppIcon,Text="RemoteAdmin Server"};
  DesktopOptions desktopOptions=new();
  Button startButton=null!,endButton=null!;
  bool exitRequested;

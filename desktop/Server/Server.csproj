@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
- <PropertyGroup><OutputType>WinExe</OutputType><AssemblyName>RemoteAdminServer</AssemblyName></PropertyGroup>
+ <PropertyGroup><OutputType>WinExe</OutputType><ApplicationIcon>../Assets/server.ico</ApplicationIcon><AssemblyName>RemoteAdminServer</AssemblyName></PropertyGroup>
  <ItemGroup><ProjectReference Include="../Shared/Shared.csproj" /></ItemGroup>
+ <ItemGroup Condition="Exists('../../native/remoteadmin_capture.dll')">
+  <Content Include="../../native/remoteadmin_capture.dll" Link="remoteadmin_capture.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="false" />
+ </ItemGroup>
 </Project>

@@ -1,4 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk">
- <PropertyGroup><OutputType>WinExe</OutputType><AssemblyName>RemoteAdminClient</AssemblyName></PropertyGroup>
+ <PropertyGroup><OutputType>WinExe</OutputType><ApplicationIcon>../Assets/viewer.ico</ApplicationIcon><AssemblyName>RemoteAdminClient</AssemblyName></PropertyGroup>
  <ItemGroup><ProjectReference Include="../Shared/Shared.csproj" /></ItemGroup>
 </Project>

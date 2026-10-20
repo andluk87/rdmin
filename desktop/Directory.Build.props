@@ -6,10 +6,15 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>12</LangVersion>
-    <Version>0.5.1</Version>
+    <Version>0.6.0</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <PublishSingleFile>false</PublishSingleFile>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <SatelliteResourceLanguages>ru;en</SatelliteResourceLanguages>
+    <!-- WinForms and reflection-based JSON are not compatible with blind trimming. -->
+    <PublishTrimmed>false</PublishTrimmed>
     <DebugType>none</DebugType>
     <Deterministic>true</Deterministic>
   </PropertyGroup>

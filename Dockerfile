@@ -23,7 +23,7 @@ FROM sources AS server
 ARG BUILD_JOBS=1
 RUN --mount=type=cache,id=remoteadmin-nuget,target=/root/.nuget/packages \
     mkdir -p /out/RemoteAdminServer \
- && x86_64-w64-mingw32-g++-posix -std=c++20 -O2 -shared native/capture.cpp -o /out/RemoteAdminServer/remoteadmin_capture.dll -ld3d11 -ldxgi -lole32 -static-libgcc -static-libstdc++ -Wl,--no-insert-timestamp \
+ && x86_64-w64-mingw32-g++-posix -std=c++20 -O2 -shared native/capture.cpp -o /src/native/remoteadmin_capture.dll -ld3d11 -ldxgi -lole32 -static-libgcc -static-libstdc++ -Wl,--no-insert-timestamp \
  && dotnet publish desktop/Server/Server.csproj --no-restore -c Release -r win-x64 --self-contained true -p:EnableWindowsTargeting=true -maxcpucount:"$(( (BUILD_JOBS + 1) / 2 ))" -o /out/RemoteAdminServer
 
 FROM sources AS client
@@ -33,10 +33,12 @@ RUN --mount=type=cache,id=remoteadmin-nuget,target=/root/.nuget/packages \
 
 FROM sources AS package
 # Debian ships the WiX compiler separately from msitools.
-RUN apt-get update && apt-get install -y --no-install-recommends wixl wixl-data \
+RUN apt-get update && apt-get install -y --no-install-recommends wixl wixl-data nsis \
  && command -v wixl \
  && rm -rf /var/lib/apt/lists/*
 COPY scripts/package.py scripts/package.py
+COPY installer/ installer/
+COPY desktop/Assets/ desktop/Assets/
 COPY README.md /documentation/README.md
 COPY docs/ /documentation/docs/
 COPY --from=server /out/RemoteAdminServer/ /out/RemoteAdminServer/

@@ -3,6 +3,8 @@ using System.Drawing.Drawing2D;
 namespace RemoteAdmin.Shared;
 
 public static class Ui {
+ public static readonly Icon AppIcon=LoadAppIcon();
+ static Icon LoadAppIcon(){try{return Icon.ExtractAssociatedIcon(Environment.ProcessPath!)??SystemIcons.Application;}catch{return SystemIcons.Application;}}
  public static string AppVersion=>typeof(Ui).Assembly.GetName().Version?.ToString(3)??"?";
  public static readonly Color Background=Color.FromArgb(243,246,251);
  public static readonly Color Panel=Color.White;
@@ -15,6 +17,7 @@ public static class Ui {
  static readonly ToolTip tips=new(){AutoPopDelay=10000,InitialDelay=400,ReshowDelay=100};
 
  public static void Theme(Form form){
+  form.Icon=AppIcon;
   form.BackColor=Background;form.ForeColor=Ink;form.Font=new Font("Segoe UI",10);
   form.MinimumSize=new Size(840,620);form.StartPosition=FormStartPosition.CenterScreen;
   form.AutoScaleMode=AutoScaleMode.Dpi;
